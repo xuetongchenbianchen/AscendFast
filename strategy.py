@@ -1,9 +1,70 @@
 from __future__ import annotations
 
+import json
+
+from agent_client import AGENT_ENABLED, call_agent_json
 from models import AnalysisResult, OptimizationStrategy
 
 
 def generate_optimization_strategies(
+    analysis: AnalysisResult,
+    max_count: int = 5,
+) -> list[OptimizationStrategy]:
+    """LLM-first strategy agent; falls back to rule-based on any failure."""
+    if AGENT_ENABLED:
+        strategies = _llm_generate_optimization_strategies(analysis, max_count)
+        if strategies:
+            return strategies
+        
+    return _rule_generate_optimization_strategies(analysis, max_count)
+
+
+def _llm_generate_optimization_strategies(
+    analysis: AnalysisResult,
+    max_count: int,
+) -> list[OptimizationStrategy] | None:
+    top_ops = analysis.top_ops[:10] if analysis.top_ops else []
+    prompt = (
+        "You are an NPU optimization strategy expert.\n"
+        "Given the AnalysisResult summary, generate up to "
+        f"{max_count} ranked OptimizationStrategy candidates.\n\n"
+        f"analysis_uid: {analysis.uid}\n"
+        f"model_id: {analysis.model_id or 'unknown'}\n"
+        f"device: {analysis.device_kind} {analysis.device_name}\n"
+        f"dtype: {analysis.dtype}\n"
+        f"total_latency_ms: {analysis.total_latency:.4f}\n"
+        f"top_ops: {top_ops}\n"
+        f"op_type_totals: {json.dumps(analysis.op_type_totals, ensure_ascii=False)}\n"
+        f"roofline_summary: {json.dumps(analysis.roofline_summary, ensure_ascii=False)}\n"
+        f"profile_findings: {json.dumps(analysis.profile_findings or [], ensure_ascii=False)}\n\n"
+        "Return JSON:\n"
+        '{"strategies": [{"rule_name": "...", "focus": "...", '
+        '"measures": ["...", "..."], "local_speedup_ratio": 1.1}, ...]}'
+    )
+    result = call_agent_json("strategy-agent", prompt)
+    if not isinstance(result, dict):
+        return None
+    raw_strategies = result.get("strategies")
+    if not isinstance(raw_strategies, list) or not raw_strategies:
+        return None
+
+    strategies: list[OptimizationStrategy] = []
+    for item in raw_strategies:
+        if not isinstance(item, dict):
+            continue
+        _append_strategy(
+            strategies, analysis, max_count,
+            rule_name=str(item.get("rule_name") or "llm"),
+            pct_total=_to_float(item.get("pct_total", 0.0)),
+            measures=item.get("measures") if isinstance(item.get("measures"), list) else ["see focus"],
+            focus=str(item.get("focus") or ""),
+            local_speedup_ratio=_to_float(item.get("local_speedup_ratio")) or None,
+            extra={"source": "llm_strategy_agent"},
+        )
+    return strategies if strategies else None
+
+
+def _rule_generate_optimization_strategies(
     analysis: AnalysisResult,
     max_count: int = 5,
 ) -> list[OptimizationStrategy]:
@@ -92,40 +153,6 @@ def generate_optimization_strategies(
                 f"normalization/reduce kernels account for {norm_reduce_pct:.1f}% "
                 "of profiled top-kernel time; reduce launch and memory overhead."
             ),
-        )
-
-    for index, hotspot in enumerate((analysis.unsupported_hotspots or [])[:max_count]):
-        name = str(hotspot.get("name") or "unknown")
-        op_type = str(hotspot.get("op_type") or "unknown")
-        pct_total = _to_float(hotspot.get("pct_total"))
-        _append_strategy(
-            strategies,
-            analysis,
-            max_count,
-            rule_name=f"unsupported_{index}",
-            pct_total=pct_total,
-            measures=[
-                f"inspect unsupported hotspot {op_type}:{name}",
-                "replace unsupported pattern with supported equivalent if possible",
-                "isolate the hotspot and check whether AutoKernel can cover it",
-            ],
-            focus=(
-                f"unsupported hotspot {op_type}:{name} contributes {pct_total:.1f}% "
-                "of profiled top-kernel time."
-            ),
-            extra={"hotspot": hotspot},
-        )
-
-    for index, hint in enumerate(analysis.optimization_hints or []):
-        _append_strategy(
-            strategies,
-            analysis,
-            max_count,
-            rule_name=f"hint_{index}",
-            pct_total=0.0,
-            measures=[hint],
-            focus=hint,
-            local_speedup_ratio=1.1,
         )
 
     if not strategies and analysis.top_ops:
@@ -226,7 +253,6 @@ def _build_strategy_prompt(
         f"- top_ops: {top_ops}\n"
         f"- op_type_totals: {analysis.op_type_totals}\n"
         f"- roofline_summary: {analysis.roofline_summary}\n"
-        f"- unsupported_hotspots: {analysis.unsupported_hotspots[:5]}\n"
     )
 
 

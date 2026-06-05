@@ -28,8 +28,7 @@ class AnalysisResult:
     top_kernels: list[dict] = field(default_factory=list)
     op_type_totals: dict[str, dict] = field(default_factory=dict)
     roofline_summary: dict[str, float] = field(default_factory=dict)
-    unsupported_hotspots: list[dict] = field(default_factory=list)
-    optimization_hints: list[str] = field(default_factory=list)
+    profile_findings: list[str] = field(default_factory=list)
 
 
 @dataclass

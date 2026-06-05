@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from agent_client import AGENT_ENABLED, call_agent_json
 from models import AnalysisResult, ProfileResult
 
 def analyze_profile(
@@ -19,19 +20,59 @@ def analyze_profile(
     Returns:
         AnalysisResult
     """
+    # report:profile_report.json(dict)
+    # report_path:AscendFast/profiles/profile_py_qwen_real
     report, report_path = _load_profile_report(profile)
     extra = profile.extra if isinstance(profile.extra, dict) else {}
-
+    # top_kernels:
+    #  [{"rank": 1,
+    #       "name": "aclnnMatmul_MatMulCommon_MatMulV2",
+    #       "op_type": "matmul",
+    #       "shape_info": "",
+    #       "device_time_ms": 8.493,
+    #       "device_time_us": 8493.36,
+    #       "call_count": 291,
+    #       "avg_time_us": 29.19,
+    #       "pct_total": 18.9,
+    #       "cumulative_pct": 18.9,
+    #       "roofline": "compute-bound",
+    #       "optimization_priority": "HIGH",}, ...]
     top_kernels = _profile_top_kernels(report)
     top_ops = [str(kernel.get("name", "")) for kernel in top_kernels if kernel.get("name")]
+    # hot_groups:
+    # {
+    #   "matmul": [
+    #       "aclnnMatmul_MatMulCommon_MatMulV2",
+    #       "another_matmul_kernel",
+    #   ],
+    #   "copy_cast": [
+    #       "aclnnCast_CastAiCore_Cast",
+    #   ],
+    #   "reduce": [
+    #       "aclnnMean_ReduceMeanAiCore_ReduceMean",
+    #   ],
+    # }
     hot_groups = _hot_groups_by_op_type(top_kernels)
+    # op_type_totals =
+    # {
+    # "other": {"device_time_ms": 21.784, "pct_total": 48.6, "call_count": 2340, "kernel_count": 17},
+    # "matmul": {"device_time_ms": 10.152, "pct_total": 22.6, "call_count": 510, "kernel_count": 3},
+    # "copy_cast": {"device_time_ms": 4.505, "pct_total": 10.0, "call_count": 522, "kernel_count": 3},
+    # "flash_attention": {"device_time_ms": 3.714, "pct_total": 8.3, "call_count": 72, "kernel_count": 1}
+    # }
     op_type_totals = _op_type_totals(top_kernels)
+    # roofline_summary
+    # {
+    #   "likely compute-bound": 21.706,
+    #   "compute-bound": 13.866,
+    #   "memory-bound": 9.223,
+    #   "likely memory-bound": 0.078
+    # }
     roofline_summary = _roofline_summary(top_kernels)
-    unsupported_hotspots = _unsupported_hotspots(top_kernels)
     latency_stats = report.get("latency_stats_ms") if isinstance(report.get("latency_stats_ms"), dict) else None
     dataset = _dataset_manifest(report)
     total_latency = _infer_total_latency_ms(profile, report, latency_stats)
-    optimization_hints = _optimization_hints(report, op_type_totals, unsupported_hotspots, latency_stats)
+    profile_findings = _profile_findings(report, op_type_totals, latency_stats, roofline_summary)
 
     analysis_extra = {
         "source_profile_uid": profile.uid,
@@ -64,8 +105,7 @@ def analyze_profile(
         top_kernels=top_kernels,
         op_type_totals=op_type_totals,
         roofline_summary=roofline_summary,
-        unsupported_hotspots=unsupported_hotspots,
-        optimization_hints=optimization_hints,
+        profile_findings=profile_findings,
     )
 
 def _load_profile_report(profile: ProfileResult) -> tuple[dict[str, Any], Path | None]:
@@ -102,7 +142,6 @@ def _load_profile_report(profile: ProfileResult) -> tuple[dict[str, Any], Path |
 
     return {}, None
 
-
 def _path_from_extra(extra: dict[str, Any]) -> Path | None:
     for key in ("profile_report_path", "report_path", "output_path"):
         value = extra.get(key)
@@ -138,7 +177,6 @@ def _op_type_totals(top_kernels: list[dict[str, Any]]) -> dict[str, dict]:
                 "device_time_ms": 0.0,
                 "pct_total": 0.0,
                 "call_count": 0,
-                "supported_time_ms": 0.0,
                 "kernel_count": 0,
             },
         )
@@ -149,19 +187,15 @@ def _op_type_totals(top_kernels: list[dict[str, Any]]) -> dict[str, dict]:
         item["pct_total"] = float(item["pct_total"]) + pct_total
         item["call_count"] = int(item["call_count"]) + call_count
         item["kernel_count"] = int(item["kernel_count"]) + 1
-        if bool(kernel.get("autokernel_supported")):
-            item["supported_time_ms"] = float(item["supported_time_ms"]) + duration_ms
     return {
         key: {
             "device_time_ms": round(float(value["device_time_ms"]), 6),
             "pct_total": round(float(value["pct_total"]), 6),
             "call_count": int(value["call_count"]),
-            "supported_time_ms": round(float(value["supported_time_ms"]), 6),
             "kernel_count": int(value["kernel_count"]),
         }
         for key, value in sorted(totals.items(), key=lambda item: float(item[1]["device_time_ms"]), reverse=True)
     }
-
 
 def _roofline_summary(top_kernels: list[dict[str, Any]]) -> dict[str, float]:
     summary: dict[str, float] = {}
@@ -172,12 +206,6 @@ def _roofline_summary(top_kernels: list[dict[str, Any]]) -> dict[str, float]:
         key: round(value, 6)
         for key, value in sorted(summary.items(), key=lambda item: item[1], reverse=True)
     }
-
-
-def _unsupported_hotspots(top_kernels: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    unsupported = [kernel for kernel in top_kernels if not bool(kernel.get("autokernel_supported"))]
-    return sorted(unsupported, key=lambda item: _float_or_zero(item.get("device_time_ms")), reverse=True)
-
 
 def _dataset_manifest(report: dict[str, Any]) -> dict | None:
     artifacts = report.get("artifacts")
@@ -205,10 +233,9 @@ def _infer_total_latency_ms(
     return total_device_time
 
 
-def _optimization_hints(
+def _rule_profile_findings(
     report: dict[str, Any],
     op_type_totals: dict[str, dict],
-    unsupported_hotspots: list[dict[str, Any]],
     latency_stats: dict | None,
 ) -> list[str]:
     hints: list[str] = []
@@ -220,35 +247,72 @@ def _optimization_hints(
 
     if matmul_pct >= 35.0:
         hints.append(
-            f"matmul dominates {matmul_pct:.1f}% of top-kernel time; prioritize GEMM/layout/dtype/batch-shape optimizations."
+            f"matmul dominates {matmul_pct:.1f}% of top-kernel time; it is the primary bottleneck."
         )
     if attention_pct >= 5.0:
         hints.append(
-            f"flash_attention accounts for {attention_pct:.1f}%; inspect attention mask layout, sequence length, and fused attention path."
+            f"flash_attention accounts for {attention_pct:.1f}% of top-kernel time."
         )
     if copy_cast_pct >= 2.0:
         hints.append(
-            f"copy_cast accounts for {copy_cast_pct:.1f}%; remove redundant dtype/layout conversions before kernel tuning."
+            f"copy_cast (dtype/layout conversion) accounts for {copy_cast_pct:.1f}% of top-kernel time."
         )
     if rmsnorm_pct + reduce_pct >= 5.0:
         hints.append(
-            f"normalization/reduce kernels account for {rmsnorm_pct + reduce_pct:.1f}%; consider fused RMSNorm or reduce cleanup."
+            f"normalization/reduce kernels account for {rmsnorm_pct + reduce_pct:.1f}% of top-kernel time."
         )
-    if unsupported_hotspots:
-        top = unsupported_hotspots[0]
-        hints.append(
-            "largest unsupported hotspot: "
-            f"{top.get('op_type', 'unknown')} {top.get('name', '')} "
-            f"({_float_or_zero(top.get('pct_total')):.1f}%)."
-        )
-    summary = report.get("optimization_summary")
-    if isinstance(summary, dict) and summary.get("estimated_max_speedup"):
-        hints.append(f"profile-estimated max speedup: {summary['estimated_max_speedup']}.")
     if latency_stats:
         noise = _float_or_zero(latency_stats.get("noise_relative"))
         if noise > 0.05:
-            hints.append(f"latency noise is high ({noise:.2%}); rerun profile before ranking small gains.")
+            hints.append(f"latency noise is high ({noise:.2%}); measurements are unreliable for small deltas.")
     return hints
+
+
+def _llm_profile_findings(
+    report: dict[str, Any],
+    op_type_totals: dict[str, dict],
+    latency_stats: dict | None,
+    roofline_summary: dict[str, float],
+) -> list[str] | None:
+    noise = _float_or_zero((latency_stats or {}).get("noise_relative"))
+    prompt = (
+        "You are an NPU performance DIAGNOSIS expert (not an optimizer).\n"
+        "Describe WHERE time is spent and WHAT the bottleneck characteristics are.\n"
+        "State objective findings only: which op types dominate, compute- vs "
+        "memory-bound split, fragmentation (high call_count / low avg time), and "
+        "measurement reliability. Do NOT propose fixes or say how to optimize.\n\n"
+        f"model: {report.get('pretrained') or report.get('model') or 'unknown'}\n"
+        f"device: {report.get('device_kind')} {report.get('device_name')}\n"
+        f"dtype: {report.get('dtype')}\n"
+        f"op_type_totals (top by device_time_ms): {json.dumps(op_type_totals, ensure_ascii=False)}\n"
+        f"roofline_summary: {json.dumps(roofline_summary, ensure_ascii=False)}\n"
+        f"latency_noise_relative: {noise:.4f}\n"
+        f"top5_pct: {(report.get('optimization_summary') or {}).get('top5_pct')}\n\n"
+        'Return JSON: {"hints": ["<finding1>", "<finding2>", ...]}'
+    )
+    result = call_agent_json("analysis-agent", prompt)
+    # 
+    if not isinstance(result, dict):
+        return None
+    hints = result.get("hints")
+    if isinstance(hints, list) and all(isinstance(h, str) for h in hints) and hints:
+        return hints
+    return None
+
+
+def _profile_findings(
+    report: dict[str, Any],
+    op_type_totals: dict[str, dict],
+    latency_stats: dict | None,
+    roofline_summary: dict[str, float] | None = None,
+) -> list[str]:
+    if AGENT_ENABLED:
+        hints = _llm_profile_findings(
+            report, op_type_totals, latency_stats, roofline_summary or {}
+        )
+        if hints:
+            return hints
+    return _rule_profile_findings(report, op_type_totals, latency_stats)
 
 
 def _pct(op_type_totals: dict[str, dict], op_type: str) -> float:

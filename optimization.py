@@ -7,10 +7,9 @@ from analysis import (
     _load_profile_report,
     _op_type_totals,
     _optional_str,
-    _optimization_hints,
+    _profile_findings,
     _profile_top_kernels,
     _roofline_summary,
-    _unsupported_hotspots,
 )
 
 from models import (

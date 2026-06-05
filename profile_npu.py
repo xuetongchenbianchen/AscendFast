@@ -70,19 +70,6 @@ def __getattr__(name: str) -> Any:
 
 DEFAULT_WARMUP_ITERS = 5
 DEFAULT_PROFILE_ITERS = 10
-DEFAULT_SUPPORTED_OP_TYPES = frozenset(
-    {
-        "matmul",
-        "softmax",
-        "layernorm",
-        "rmsnorm",
-        "flash_attention",
-        "fused_mlp",
-        "cross_entropy",
-        "rotary_embedding",
-        "reduce",
-    }
-)
 
 _KERNEL_CLASSIFICATION: tuple[tuple[tuple[str, ...], str], ...] = (
     (("flashattentionscore", "fusion_attention", "flash_attention", "flash", "fmha", "attention"), "flash_attention"),
@@ -102,9 +89,7 @@ _ANOMALY_REQUIRED_ARTIFACTS = ("kernel_details", "op_summary", "trace_view")
 
 @dataclass(frozen=True)
 class ProfileOptimizationSummary:
-    supported_kernels_pct: float | None = None
     top5_pct: float | None = None
-    estimated_max_speedup: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -122,7 +107,6 @@ class ProfileOp:
         call_count: 该算子/kernel 在 profile 窗口内的调用次数。
         avg_time_us: 单次调用的平均耗时，单位微秒。
         shape_info: 报告中记录的输入/输出 shape 或其他形状描述。
-        autokernel_supported: 是否已被 AutoKernel 当前算子优化能力覆盖。
         roofline: roofline/性能瓶颈分类，例如 compute、memory 或 unknown。
         optimization_priority: profile 报告给出的优化优先级，例如 HIGH/MEDIUM/LOW。
         source: 该记录的来源；默认是 profile_report，加载文件后通常写入报告路径。
@@ -137,7 +121,6 @@ class ProfileOp:
     call_count: int | None = None
     avg_time_us: float | None = None
     shape_info: str = ""
-    autokernel_supported: bool = False
     roofline: str = "unknown"
     optimization_priority: str = "LOW"
     source: str = "profile_report"
@@ -236,7 +219,6 @@ class KernelRecord:
     call_count: int
     input_shapes: str = ""
     roofline: str = ""
-    supported: bool = False
 
 
 @dataclass(frozen=True)
@@ -267,9 +249,7 @@ def _profile_optimization_summary(data: dict[str, Any]) -> ProfileOptimizationSu
     if not isinstance(raw, dict):
         return ProfileOptimizationSummary()
     return ProfileOptimizationSummary(
-        supported_kernels_pct=_to_float(raw.get("supported_kernels_pct")),
         top5_pct=_to_float(raw.get("top5_pct")),
-        estimated_max_speedup=str(raw.get("estimated_max_speedup")) if raw.get("estimated_max_speedup") is not None else None,
         raw=dict(raw),
     )
 
@@ -326,7 +306,6 @@ def load_profile_report(path: str | Path) -> ProfileReportData:
                 call_count=int(item.get("call_count") or 0) if item.get("call_count") is not None else None,
                 avg_time_us=_to_float(item.get("avg_time_us")),
                 shape_info=str(item.get("shape_info") or item.get("shape") or ""),
-                autokernel_supported=bool(item.get("autokernel_supported", False)),
                 roofline=str(item.get("roofline") or "unknown"),
                 optimization_priority=str(item.get("optimization_priority") or "LOW"),
                 source=str(report_path),
@@ -1150,7 +1129,6 @@ def build_profile_report(
                 call_count=record.call_count,
                 input_shapes=record.input_shapes,
                 roofline=estimate_roofline_position(record.op_type, record.device_time_us),
-                supported=record.op_type in DEFAULT_SUPPORTED_OP_TYPES,
             )
         )
 
@@ -1172,21 +1150,15 @@ def build_profile_report(
                 "pct_total": round(pct, 1),
                 "cumulative_pct": round(cumulative_pct, 1),
                 "roofline": record.roofline,
-                "autokernel_supported": record.supported,
                 "optimization_priority": _priority_label(pct),
             }
         )
 
-    supported_time_us = sum(record.device_time_us for record in annotated if record.supported)
-    supported_pct = (supported_time_us / total_time_us * 100.0) if total_time_us > 0.0 else 0.0
     top5_time_us = sum(record.device_time_us for record in annotated[:5])
     top5_pct = (top5_time_us / total_time_us * 100.0) if total_time_us > 0.0 else 0.0
-    fraction = supported_pct / 100.0
-    assumed_local_speedup = 3.0
-    amdahl_speedup = 1.0 / ((1.0 - fraction) + fraction / assumed_local_speedup) if fraction > 0.0 else 1.0
 
     report: dict[str, Any] = {
-        "schema_version": 3,
+        "schema_version": 4,
         "producer": "profile_npu.py",
         "model": config.model or config.module,
         "model_desc": model_desc,
@@ -1209,12 +1181,7 @@ def build_profile_report(
         "profile_iters": config.profile_iters,
         "top_kernels": top_kernels,
         "optimization_summary": {
-            "supported_kernels_pct": round(supported_pct, 1),
             "top5_pct": round(top5_pct, 1),
-            "estimated_max_speedup": (
-                f"{amdahl_speedup:.1f}x "
-                f"(Amdahl's law, f={fraction:.0%} supported, {assumed_local_speedup:.0f}x per-kernel)"
-            ),
         },
     }
     if artifacts:
@@ -1246,9 +1213,7 @@ def print_report(report: dict[str, Any]) -> None:
         )
     summary = report.get("optimization_summary", {})
     print()
-    print(f"  Supported time: {summary.get('supported_kernels_pct', 0.0):.1f}%")
     print(f"  Top-5 time:     {summary.get('top5_pct', 0.0):.1f}%")
-    print(f"  Estimate:       {summary.get('estimated_max_speedup', '')}")
 
 
 # 加载模型、执行 NPU profiling、汇总 kernel/latency 数据

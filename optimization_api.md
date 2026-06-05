@@ -27,8 +27,7 @@
 | dtype | str \| None | profile 使用的数据类型 |
 | op_type_totals | dict[str, dict] | 按 op_type 聚合后的耗时统计 |
 | roofline_summary | dict[str, float] | roofline 分类耗时统计 |
-| unsupported_hotspots | list[dict] | AutoKernel 暂不支持的热点 |
-| optimization_hints | list[str] | profile 分析阶段生成的优化提示 |
+| profile_findings | list[str] | profile 分析阶段生成的优化提示 |
 
 ### 1.3 ExecutionMode（执行模式）
 

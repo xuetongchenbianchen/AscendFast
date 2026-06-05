@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "producer": "profile_npu.py",
   "model": "transformers",
   "model_desc": "AutoModelForCausalLM from transformers (pretrained: model/Qwen2.5-0.5B-Instruct)",
@@ -37,7 +37,6 @@
       "pct_total": 18.9,
       "cumulative_pct": 18.9,
       "roofline": "compute-bound",
-      "autokernel_supported": true,
       "optimization_priority": "HIGH"
     },
     {
@@ -52,7 +51,6 @@
       "pct_total": 13.6,
       "cumulative_pct": 32.5,
       "roofline": "likely compute-bound",
-      "autokernel_supported": false,
       "optimization_priority": "HIGH"
     },
     {
@@ -67,7 +65,6 @@
       "pct_total": 8.3,
       "cumulative_pct": 40.8,
       "roofline": "compute-bound",
-      "autokernel_supported": true,
       "optimization_priority": "MEDIUM"
     },
     {
@@ -82,7 +79,6 @@
       "pct_total": 7.8,
       "cumulative_pct": 48.6,
       "roofline": "likely compute-bound",
-      "autokernel_supported": false,
       "optimization_priority": "MEDIUM"
     },
     {
@@ -97,7 +93,6 @@
       "pct_total": 5.1,
       "cumulative_pct": 53.7,
       "roofline": "likely compute-bound",
-      "autokernel_supported": false,
       "optimization_priority": "MEDIUM"
     },
     {
@@ -112,7 +107,6 @@
       "pct_total": 5.1,
       "cumulative_pct": 58.8,
       "roofline": "likely compute-bound",
-      "autokernel_supported": false,
       "optimization_priority": "MEDIUM"
     },
     {
@@ -127,7 +121,6 @@
       "pct_total": 4.6,
       "cumulative_pct": 63.4,
       "roofline": "memory-bound",
-      "autokernel_supported": false,
       "optimization_priority": "MEDIUM"
     },
     {
@@ -142,7 +135,6 @@
       "pct_total": 4.5,
       "cumulative_pct": 67.9,
       "roofline": "memory-bound",
-      "autokernel_supported": true,
       "optimization_priority": "MEDIUM"
     },
     {
@@ -157,7 +149,6 @@
       "pct_total": 4.4,
       "cumulative_pct": 72.3,
       "roofline": "likely compute-bound",
-      "autokernel_supported": false,
       "optimization_priority": "MEDIUM"
     },
     {
@@ -172,7 +163,6 @@
       "pct_total": 4.2,
       "cumulative_pct": 76.5,
       "roofline": "likely compute-bound",
-      "autokernel_supported": false,
       "optimization_priority": "MEDIUM"
     },
     {
@@ -187,7 +177,6 @@
       "pct_total": 4.2,
       "cumulative_pct": 80.7,
       "roofline": "memory-bound",
-      "autokernel_supported": true,
       "optimization_priority": "MEDIUM"
     },
     {
@@ -202,7 +191,6 @@
       "pct_total": 3.7,
       "cumulative_pct": 84.3,
       "roofline": "compute-bound",
-      "autokernel_supported": true,
       "optimization_priority": "MEDIUM"
     },
     {
@@ -217,7 +205,6 @@
       "pct_total": 3.0,
       "cumulative_pct": 87.4,
       "roofline": "likely compute-bound",
-      "autokernel_supported": false,
       "optimization_priority": "MEDIUM"
     },
     {
@@ -232,7 +219,6 @@
       "pct_total": 3.0,
       "cumulative_pct": 90.4,
       "roofline": "memory-bound",
-      "autokernel_supported": false,
       "optimization_priority": "LOW"
     },
     {
@@ -247,7 +233,6 @@
       "pct_total": 2.4,
       "cumulative_pct": 92.8,
       "roofline": "memory-bound",
-      "autokernel_supported": false,
       "optimization_priority": "LOW"
     },
     {
@@ -262,7 +247,6 @@
       "pct_total": 1.6,
       "cumulative_pct": 94.4,
       "roofline": "likely compute-bound",
-      "autokernel_supported": false,
       "optimization_priority": "LOW"
     },
     {
@@ -277,7 +261,6 @@
       "pct_total": 1.5,
       "cumulative_pct": 95.9,
       "roofline": "memory-bound",
-      "autokernel_supported": true,
       "optimization_priority": "LOW"
     },
     {
@@ -292,7 +275,6 @@
       "pct_total": 1.1,
       "cumulative_pct": 97.0,
       "roofline": "likely compute-bound",
-      "autokernel_supported": false,
       "optimization_priority": "LOW"
     },
     {
@@ -307,7 +289,6 @@
       "pct_total": 1.1,
       "cumulative_pct": 98.1,
       "roofline": "likely compute-bound",
-      "autokernel_supported": false,
       "optimization_priority": "LOW"
     },
     {
@@ -322,7 +303,6 @@
       "pct_total": 1.0,
       "cumulative_pct": 99.1,
       "roofline": "likely compute-bound",
-      "autokernel_supported": false,
       "optimization_priority": "LOW"
     },
     {
@@ -337,7 +317,6 @@
       "pct_total": 0.4,
       "cumulative_pct": 99.5,
       "roofline": "likely compute-bound",
-      "autokernel_supported": false,
       "optimization_priority": "LOW"
     },
     {
@@ -352,7 +331,6 @@
       "pct_total": 0.3,
       "cumulative_pct": 99.8,
       "roofline": "memory-bound",
-      "autokernel_supported": true,
       "optimization_priority": "LOW"
     },
     {
@@ -367,7 +345,6 @@
       "pct_total": 0.1,
       "cumulative_pct": 99.8,
       "roofline": "likely memory-bound",
-      "autokernel_supported": false,
       "optimization_priority": "LOW"
     },
     {
@@ -382,7 +359,6 @@
       "pct_total": 0.1,
       "cumulative_pct": 99.9,
       "roofline": "likely memory-bound",
-      "autokernel_supported": false,
       "optimization_priority": "LOW"
     },
     {
@@ -397,7 +373,6 @@
       "pct_total": 0.0,
       "cumulative_pct": 100.0,
       "roofline": "compute-bound",
-      "autokernel_supported": true,
       "optimization_priority": "LOW"
     },
     {
@@ -412,7 +387,6 @@
       "pct_total": 0.0,
       "cumulative_pct": 100.0,
       "roofline": "likely memory-bound",
-      "autokernel_supported": false,
       "optimization_priority": "LOW"
     },
     {
@@ -427,7 +401,6 @@
       "pct_total": 0.0,
       "cumulative_pct": 100.0,
       "roofline": "likely memory-bound",
-      "autokernel_supported": false,
       "optimization_priority": "LOW"
     },
     {
@@ -442,14 +415,11 @@
       "pct_total": 0.0,
       "cumulative_pct": 100.0,
       "roofline": "likely memory-bound",
-      "autokernel_supported": false,
       "optimization_priority": "LOW"
     }
   ],
   "optimization_summary": {
-    "supported_kernels_pct": 41.4,
-    "top5_pct": 53.7,
-    "estimated_max_speedup": "1.4x (Amdahl's law, f=41% supported, 3x per-kernel)"
+    "top5_pct": 53.7
   },
   "artifacts": {
     "profiler_output_dir": "profiles/profile_py_qwen_real",
