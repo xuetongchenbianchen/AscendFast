@@ -12,27 +12,13 @@ from analysis import (
     _roofline_summary,
 )
 
+from apply import apply_optimization
 from models import (
     OptimizationStrategy, AnalysisResult, ExecutionMode, ProfileResult,
 )
 from strategy import generate_optimization_strategies
 
 
-def apply_optimization(
-    strategy: OptimizationStrategy,
-    model_id: str,
-) -> ExecutionMode:
-    """
-    将 strategy.prompt_instruction 传给 Agent，Agent 修改模型后
-    返回对应的 ExecutionMode（correctness_passed=None）。
-    
-    Args:
-        strategy:  待执行的优化策略
-        model_id:   目标模型标识
-    
-    Returns:
-        ExecutionMode，correctness_passed 尚未填写
-    """
 
 def run_correctness_test(
     mode: ExecutionMode,

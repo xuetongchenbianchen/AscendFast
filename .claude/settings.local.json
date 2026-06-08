@@ -4,7 +4,8 @@
       "Bash(python3 -c ' *)",
       "Bash(python3 -c \"import anthropic; print\\('anthropic', anthropic.__version__\\)\")",
       "Bash(env)",
-      "Bash(timeout 90 claude -p \"Reply with ONLY this JSON and nothing else: {\\\\\"ok\\\\\": true}\" --output-format json)"
+      "Bash(timeout 90 claude -p \"Reply with ONLY this JSON and nothing else: {\\\\\"ok\\\\\": true}\" --output-format json)",
+      "Bash(grep -E \"\\\\.py$|\\\\.toml$|\\\\.json$|^d\")"
     ]
   }
 }

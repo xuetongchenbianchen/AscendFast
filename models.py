@@ -3,6 +3,15 @@ from dataclasses import dataclass, field
 
 
 @dataclass
+class AppliedArtifact:
+    """Agent 应用优化后留下的产物记录。"""
+    kind: str                   # "patch" | "config" | "weight" | "graph" | "custom"
+    paths: list[str]            # 相对于 adaptations/<model_id>/<strategy_uid>/ 的路径
+    revert_cmd: str | None = None
+    metadata: dict | None = None
+
+
+@dataclass
 class OptimizationStrategy:
     uid: str
     local_speedup_ratio: float
@@ -36,6 +45,7 @@ class ExecutionMode:
     uid: str
     model_id: str
     strategy_uid: str
+    artifacts: list[AppliedArtifact] = field(default_factory=list)
     correctness_passed: bool | None = None
     extra: dict | None = None
 
