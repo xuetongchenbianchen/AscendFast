@@ -71,7 +71,7 @@ def _llm_run_profile(mode: ExecutionMode) -> ProfileResult | None:
         ' "profile_mode": "forward|generate",\n'
         ' "notes": "<one line>"}'
     )
-    result = call_agent_json("profile-agent", prompt, timeout=900)
+    result = call_agent_json("profile-agent", prompt, timeout=1000)
     if not isinstance(result, dict) or "profile_report_path" not in result:
         return None
     report_path = Path(str(result["profile_report_path"]))

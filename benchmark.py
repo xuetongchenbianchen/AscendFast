@@ -1,6 +1,6 @@
 """真实领域数据集上的离线 benchmark：测一个 ExecutionMode 的 forward（prefill）延迟。
 
-定位（与 profile.run_profile 区分）：
+定位（与 profile_runner.run_profile 区分）：
 - run_profile        —— 用模拟数据 + torch_npu profiler 做**诊断**，产 top_kernels 等。
 - run_real_benchmark —— 用真实 ShareGPT 数据集测**纯推理延迟**，作为加速比标尺。
 

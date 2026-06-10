@@ -7,7 +7,7 @@ from apply import apply_optimization, ensure_baseline_mode
 from benchmark import run_real_benchmark
 from correctness import run_correctness_test
 from models import ExecutionMode, RunLedger
-from profile import run_profile
+from profile_runner import run_profile
 from strategy import generate_optimization_strategies
 from verify import (
     gate_apply,
@@ -28,6 +28,7 @@ def optimize(
     depth: int = 0,
     top_k: int = 5,
     baseline_mode: ExecutionMode | None = None,
+    max_depth: int = MAX_DEPTH,
 ) -> tuple[ExecutionMode, float]:
     """在 base_mode 快照之上迭代叠加优化，返回 (最优 mode, 其延迟 ms)。
 
@@ -65,7 +66,7 @@ def optimize(
     elif latency <= baseline_latency / 2:
         ledger.stop_reason = "reached_2x"
         return base_mode, latency
-    if depth >= MAX_DEPTH:
+    if depth >= max_depth:
         ledger.stop_reason = ledger.stop_reason or "max_depth"
         return base_mode, latency
 
@@ -118,7 +119,7 @@ def optimize(
             continue
 
         cand_mode, cand_lat = optimize(
-            child, ledger, baseline_latency, depth + 1, top_k, baseline_mode
+            child, ledger, baseline_latency, depth + 1, top_k, baseline_mode, max_depth
         )
         if cand_lat < best_lat:
             best_mode, best_lat = cand_mode, cand_lat
@@ -130,7 +131,12 @@ def optimize(
     return best_mode, best_lat
 
 
-def run(model_id: str, model_dir: str, top_k: int = 5) -> tuple[ExecutionMode, float]:
+def run(
+    model_id: str,
+    model_dir: str,
+    top_k: int = 5,
+    max_depth: int = MAX_DEPTH,
+) -> tuple[ExecutionMode, float]:
     """顶层：物化 baseline → 从 depth=0 开始统一迭代。无任何首轮特例。
 
     创建本次 run 的 RunLedger 并设为当前（agent_client 据此记 agent_call 事件），
@@ -143,7 +149,7 @@ def run(model_id: str, model_dir: str, top_k: int = 5) -> tuple[ExecutionMode, f
     ledger = RunLedger(run_uid=f"run:{model_id}:{int(time.time())}", model_id=model_id)
     set_current_ledger(ledger)
     try:
-        best_mode, best_lat = optimize(baseline, ledger, top_k=top_k)
+        best_mode, best_lat = optimize(baseline, ledger, top_k=top_k, max_depth=max_depth)
         ledger.best_mode_uid = best_mode.uid
         ledger.best_latency = best_lat
         return best_mode, best_lat

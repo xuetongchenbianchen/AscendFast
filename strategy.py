@@ -41,7 +41,7 @@ def _llm_generate_optimization_strategies(
         '{"strategies": [{"rule_name": "...", "focus": "...", '
         '"measures": ["...", "..."], "local_speedup_ratio": 1.1}, ...]}'
     )
-    result = call_agent_json("strategy-agent", prompt)
+    result = call_agent_json("strategy-agent", prompt, timeout=1000)
     if not isinstance(result, dict):
         return None
     raw_strategies = result.get("strategies")

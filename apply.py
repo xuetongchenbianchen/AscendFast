@@ -120,7 +120,7 @@ def _llm_apply_optimization(
         ' "revert_cmd": "<shell cmd to undo, or null>",\n'
         ' "metadata": {}}'
     )
-    result = call_agent_json("optimization-agent", prompt, timeout=600)
+    result = call_agent_json("optimization-agent", prompt, timeout=1000)
     if not isinstance(result, dict) or "summary" not in result:
         return None
     files = result.get("files")

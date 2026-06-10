@@ -8,7 +8,7 @@ build_model.py）暴露统一入口：
 无论 workspace 里嵌的是哪种优化（forward patch / 算子融合 / 量化 / ...），
 correctness / profile / benchmark 都**只**通过这个入口加载模型——这是全项目
 唯一的模型真相源。加载逻辑本身与 profiling/benchmark 无关，所以独立成模块，
-避免各功能去 import profile.py 的私有实现。
+避免各功能去 import profile_runner.py 的私有实现。
 
 注意：本模块不依赖 torch，只负责 import workspace 的 build_model.py 并调用它；
 具体 device / dtype 由 build_model() 自身决定。

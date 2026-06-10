@@ -290,7 +290,7 @@ def _llm_profile_findings(
         f"top5_pct: {(report.get('optimization_summary') or {}).get('top5_pct')}\n\n"
         'Return JSON: {"hints": ["<finding1>", "<finding2>", ...]}'
     )
-    result = call_agent_json("analysis-agent", prompt)
+    result = call_agent_json("analysis-agent", prompt, timeout=1000)
     # 
     if not isinstance(result, dict):
         return None

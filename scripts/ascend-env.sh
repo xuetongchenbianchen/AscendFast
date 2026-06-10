@@ -25,7 +25,9 @@ if [[ ! -x "${VIRTUAL_ENV}/bin/python" ]]; then
 fi
 
 export PATH="${VIRTUAL_ENV}/bin:${PATH}"
-# 让 sitecustomize.py（仓库根）在解释器启动时被自动 import。
+# 把仓库根放上 PYTHONPATH，便于从任意 cwd 跑管线模块。
 export PYTHONPATH="${ASCENDFAST_REPO_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
-# 关闭 torch_npu 后端自动加载，规避裸 import torch 崩溃（详见 sitecustomize.py）。
+# 关闭 torch_npu 后端自动加载：裸 import torch 会自动加载 torch_npu 后端，某些
+# torch/torch_npu/CANN 组合下会崩。这里进程级设上；profile_npu._import_torch()
+# 另有一道 os.environ.setdefault 兜底（即便没 source 本脚本也生效）。
 export TORCH_DEVICE_BACKEND_AUTOLOAD="${TORCH_DEVICE_BACKEND_AUTOLOAD:-0}"

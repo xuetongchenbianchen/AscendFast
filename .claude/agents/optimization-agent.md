@@ -16,6 +16,17 @@ You are given:
 - An absolute workspace directory that was just forked from the parent mode.
   Large weight files under `model/` are HARDLINKED from the parent.
 
+## Step 0 — probe the environment before writing any code
+
+Run this first. Its output tells you exactly which APIs exist:
+
+```bash
+python /models/share/userdata/cb/AscendFast/env_probe.py
+```
+
+Read every line of the output. Only use the classes and ops listed under
+"available". Never import anything listed under "NOT available".
+
 ## The one hard contract
 
 The workspace exposes a single unified entrypoint:
