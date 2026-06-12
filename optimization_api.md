@@ -112,7 +112,7 @@ def apply_optimization(
     """在 base_mode 的快照之上叠加 strategy，返回新的 ExecutionMode。
 
     1. fork base_mode.workspace_dir → 新 work_dir（大权重硬链接，零拷贝）。
-    2. 把 base_mode.change_log 注入 prompt，要求 optimization-agent 在已有
+    2. 把 base_mode.change_log 注入 prompt，要求 apply-agent 在已有
        优化之上叠加，不撤销/重复，并保证 build_model() 仍可运行。
     3. Agent 原地修改 work_dir，返回一条 ChangeRecord。
     4. 框架追加 ChangeRecord、写 manifest，新 mode 的 change_log =

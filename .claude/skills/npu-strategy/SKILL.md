@@ -19,7 +19,7 @@ class OptimizationStrategy:
     extra: dict | None
 ```
 
-## 先选 LEVER（杠杆），再选 measure
+## 先选 LEVER，再选 measure
 
 一条策略会落在四个层级之一，`ChangeRecord.kind` 记录的就是落在哪一层。
 **不要**默认用 `forward_patch`——NPU 上的大部分收益都在 forward 之外。

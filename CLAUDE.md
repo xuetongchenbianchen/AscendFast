@@ -49,7 +49,7 @@ from patches import my_patch       # top-level
 workspace 的模块。顶层的 patch import 会在 `exec_module()` 时执行，可能与之前
 加载过的某个 workspace 里同名的 `patches` 包发生冲突。
 
-## optimization-agent 的强制 smoke test
+## apply-agent 的强制 smoke test
 
 写完任何代码后，返回 JSON 之前先运行这个：
 
@@ -87,5 +87,5 @@ runs/                   # RunLedger JSON files (one per optimization run)
 |---|---|---|
 | profile-agent | 跑 profiler，返回路径 + 延迟 | 解读结果 |
 | analysis-agent | 找出时间花在**哪里** | 提出修复方案 |
-| strategy-agent | 提出优化**什么** | 写代码 |
-| optimization-agent | 写代码 + 验证 | 发明策略 |
+| strategy-agent | 提出优化**什么**、**为什么**（WHAT/WHY） | 写代码、把 HOW 定死 |
+| apply-agent | 写代码 + 验证（HOW） | 发明策略 |
