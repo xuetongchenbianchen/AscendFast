@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: ascendfast-ops
+Version: 0.1.0
+Summary: AscendFast 自定义高性能 NPU 算子库：注册进 torch.ops.ascendfast 命名空间，供任意 ExecutionMode workspace 复用。
+Requires-Python: >=3.10

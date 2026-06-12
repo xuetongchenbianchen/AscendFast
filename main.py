@@ -9,16 +9,24 @@
 
 跑完会打印最优 mode / 延迟 / 加速比，并指向本次 run 的 ledger（runs/<run_uid>.json）——
 那里记着这次探索了哪棵树、每个环节成败、为什么停。
+
+默认行为：每次重跑会先清空 runs/ 以及 adaptations/<model-id>/，保证只剩本次实验产生的
+workspace（baseline/ 和 mode_*/），不会和上一轮的混在一起。若想保留上一轮的
+adaptations 做对比，加 --keep-adaptations：
+    python main.py --model-id Qwen2.5-0.5B-Instruct --keep-adaptations
+注意 --keep-adaptations 会复用已有的 baseline/ 缓存，新旧实验目录会并存，需自行分辨。
 """
 from __future__ import annotations
 
 import argparse
+import shutil
 from pathlib import Path
 
 from optimization import run
 
 _PROJECT_ROOT = Path(__file__).resolve().parent
 _RUNS_DIR = _PROJECT_ROOT / "runs"
+_ADAPTATIONS_DIR = _PROJECT_ROOT / "adaptations"
 
 
 def _default_model_dir(model_id: str) -> str:
@@ -47,6 +55,10 @@ def main() -> None:
         "--max-depth", type=int, default=2,
         help="优化链最大深度（baseline 为 depth=0）。首跑建议 2。",
     )
+    parser.add_argument(
+        "--keep-adaptations", action="store_true",
+        help="保留 adaptations/<model-id>/ 旧 workspace（默认每次重跑会清空它）。",
+    )
     args = parser.parse_args()
 
     model_dir = args.model_dir or _default_model_dir(args.model_id)
@@ -58,6 +70,22 @@ def main() -> None:
     print(f"  model_dir = {model_dir}")
     print(f"  top_k     = {args.top_k}    max_depth = {args.max_depth}")
     print("=" * 70)
+
+    if _RUNS_DIR.exists():
+        shutil.rmtree(_RUNS_DIR)
+    _RUNS_DIR.mkdir()
+
+    # 每次重跑默认清空本模型的 adaptations 目录，避免新旧实验的 workspace 混在一起；
+    # 加 --keep-adaptations 时保留旧 workspace（仍会复用已有 baseline 缓存）。
+    model_adapt_dir = _ADAPTATIONS_DIR / args.model_id
+    if args.keep_adaptations:
+        print(f"  保留旧 adaptations: {model_adapt_dir}")
+        model_adapt_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        if model_adapt_dir.exists():
+            print(f"  清空旧 adaptations: {model_adapt_dir}")
+            shutil.rmtree(model_adapt_dir)
+        model_adapt_dir.mkdir(parents=True)
 
     best_mode, best_lat = run(
         args.model_id, model_dir, top_k=args.top_k, max_depth=args.max_depth,

@@ -49,7 +49,11 @@ def optimize(
     if baseline_mode is None:
         baseline_mode = base_mode               # depth=0：base_mode 即 baseline 根
 
+    indent = "  " * depth
+    print(f"\n{indent}[depth={depth}] ▶ {base_mode.uid}")
+
     # ① 延迟标尺：每个 mode（含 baseline）进来先用真实数据集 benchmark 测 forward 延迟
+    print(f"{indent}  📊 benchmark ...")
     with stage(ledger, "benchmark", base_mode.uid) as st:
         st.value = run_real_benchmark(base_mode)
     if not st.ok:
@@ -63,42 +67,54 @@ def optimize(
     if baseline_latency is None:
         baseline_latency = latency
         ledger.baseline_latency = baseline_latency
-    elif latency <= baseline_latency / 2:
-        ledger.stop_reason = "reached_2x"
-        return base_mode, latency
+        print(f"{indent}  ✅ baseline latency = {latency:.4f} ms")
+    else:
+        speedup = baseline_latency / latency
+        print(f"{indent}  ✅ latency = {latency:.4f} ms  ({speedup:.2f}x vs baseline)")
+        if latency <= baseline_latency / 2:
+            print(f"{indent}  🎉 达成 2x 加速，提前终止！")
+            ledger.stop_reason = "reached_2x"
+            return base_mode, latency
     if depth >= max_depth:
+        print(f"{indent}  ⛔ 达到最大深度 {max_depth}，停止递归")
         ledger.stop_reason = ledger.stop_reason or "max_depth"
         return base_mode, latency
 
-
     # ② 诊断 + 策略生成（唯一一处）：profile→analyze 只为定位热点、产出策略
+    print(f"{indent}  🔬 profile ...")
     with stage(ledger, "profile", base_mode.uid) as st:
         st.value = run_profile(base_mode)
     if not st.ok:
+        print(f"{indent}  ❌ profile 失败，跳过")
         ledger.stop_reason = ledger.stop_reason or "stage_failed:profile"
         return base_mode, latency
     profile_result = st.value
 
-
+    print(f"{indent}  🧠 analyze ...")
     with stage(ledger, "analyze", base_mode.uid) as st:
         st.value = analyze_profile(profile_result)
     if not st.ok:
+        print(f"{indent}  ❌ analyze 失败，跳过")
         ledger.stop_reason = ledger.stop_reason or "stage_failed:analyze"
         return base_mode, latency
     analysis = st.value
 
+    print(f"{indent}  💡 generate strategies (top_k={top_k}) ...")
     with stage(ledger, "strategy", base_mode.uid) as st:
         st.value = generate_optimization_strategies(analysis, top_k)
         ok, reason = gate_strategy(st.value)
         if not ok:
             st.fail(reason)                 # 空策略列表门禁：不再静默零循环
     if not st.ok:
+        print(f"{indent}  ❌ 无可用策略，停止")
         ledger.stop_reason = ledger.stop_reason or "no_strategies"
         return base_mode, latency
     strategies = st.value
+    print(f"{indent}  📋 生成 {len(strategies)} 条策略")
 
     best_mode, best_lat = base_mode, latency
-    for strategy in strategies[:top_k]:
+    for i, strategy in enumerate(strategies[:top_k]):
+        print(f"{indent}  ⚙️  apply [{i+1}/{min(len(strategies), top_k)}]: {strategy.uid}")
         # apply：fork + agent 叠加优化。gate_apply 拦下 None-record（agent 失败），
         # 这次没产出可叠加的优化就跳过，不再递归进一个"没真改"的 mode。
         with stage(ledger, "apply", base_mode.uid) as st:
@@ -107,16 +123,21 @@ def optimize(
             if not ok:
                 st.fail(reason)
         if not st.ok:
+            print(f"{indent}    ❌ apply 失败，跳过")
             continue
         child = st.value
 
+        print(f"{indent}    🧪 correctness test ...")
         with stage(ledger, "correctness", child.uid) as st:
             st.value = run_correctness_test(child, baseline_mode)
         if not st.ok:
+            print(f"{indent}    ❌ 正确性测试失败，跳过")
             continue
         child = st.value
         if not child.correctness_passed:
+            print(f"{indent}    ❌ 输出不一致，跳过")
             continue
+        print(f"{indent}    ✅ 正确性通过，递归优化 ...")
 
         cand_mode, cand_lat = optimize(
             child, ledger, baseline_latency, depth + 1, top_k, baseline_mode, max_depth
@@ -126,6 +147,7 @@ def optimize(
             if best_lat <= baseline_latency / 2:
                 ledger.stop_reason = "reached_2x"
                 break                       # 提前命中 2x，逐层冒泡返回
+    print(f"{indent}  → depth={depth} 最优: {best_mode.uid}  {best_lat:.4f} ms")
     if ledger.stop_reason is None:
         ledger.stop_reason = "exhausted"
     return best_mode, best_lat
@@ -143,6 +165,7 @@ def run(
     递归结束后写 best_mode/best_latency 并落盘——这一次探索了哪棵树、为什么停，
     从此有处可寻。
     """
+    print("🚀 物化 baseline ...")
     baseline = ensure_baseline_mode(model_id, model_dir)
     baseline.correctness_passed = True      # 原始模型按定义正确
 

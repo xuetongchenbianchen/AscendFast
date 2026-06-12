@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ascendfast-ops"
+version = "0.1.0"
+description = "AscendFast 自定义高性能 NPU 算子库：注册进 torch.ops.ascendfast 命名空间，供任意 ExecutionMode workspace 复用。"
+requires-python = ">=3.10"
+# 不在此处声明 torch/torch_npu —— 它们由项目 venv 提供，避免重复解析依赖。
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+# 编译产物（C2 的 .so）随包分发；C1 占位阶段此目录可为空。
+ascendfast_ops = ["lib/*.so"]
