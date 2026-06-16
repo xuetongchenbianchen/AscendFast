@@ -10,7 +10,25 @@
       "Bash(govctl check *)",
       "Bash(export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin)",
       "Bash(echo \"=== torchair anywhere on disk? ===\")",
-      "Bash(find / -maxdepth 8 -name \"torchair*\")"
+      "Bash(find / -maxdepth 8 -name \"torchair*\")",
+      "Skill(gov)",
+      "Bash(govctl status *)",
+      "Bash(govctl work *)",
+      "Bash(govctl rfc *)",
+      "Bash(python -m pytest test_apply_repair.py -v)",
+      "Bash(.venv/bin/python -m pytest test_apply_repair.py -v)",
+      "Bash(.venv/bin/python -c \"import apply; import models; print\\('apply.py imports OK'\\); print\\('GateResult:', models.GateResult\\); print\\('apply_optimization signature:', apply.apply_optimization.__code__.co_varnames[:4]\\)\")",
+      "Bash(cat)",
+      "Bash(govctl loop *)",
+      "Read(//models/share/userdata/cb/govctl/gov.archived/**)",
+      "Read(//models/share/userdata/cb/govctl/gov.archived/adr/**)",
+      "Read(//models/share/userdata/cb/govctl/**)",
+      "Bash(git -C /models/share/userdata/cb/govctl status --short)",
+      "Bash(python3 -c \"import json;d=json.load\\(open\\('adaptations/Qwen2.5-0.5B-Instruct/mode_Qwen2.5-0.5B-Instruct_1_1781623139/mode_manifest.json'\\)\\);print\\(json.dumps\\(d.get\\('change_log',[]\\),ensure_ascii=False,indent=2\\)[:2000]\\)\")",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git reset *)",
+      "Bash(git ls-tree *)"
     ]
   }
 }

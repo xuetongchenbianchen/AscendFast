@@ -1,8 +1,5 @@
 # AscendFast — 所有 agent 的项目上下文
 
-> 本项目受 **govctl** 治理：`spec → impl → test → stable`，RFC 至上，不静默偏离。
-> 治理产物在 `gov/`，命令用 `govctl`。详见下方「govctl 治理」。
-
 ## 硬件 & 运行时
 
 - 设备：Ascend 910 NPU (`npu:0`)
@@ -103,28 +100,3 @@ runs/                   # RunLedger JSON files (one per optimization run)
 | analysis-agent | 找出时间花在**哪里** | 提出修复方案 |
 | strategy-agent | 提出优化**什么**、**为什么**（WHAT/WHY） | 写代码、把 HOW 定死 |
 | apply-agent | 写代码 + 验证（HOW） | 发明策略 |
-
-## govctl 治理（本项目受治理）
-
-本项目由 govctl 治理。治理产物（source of truth）在 `gov/` 下：`rfc/ adr/ work/ guard/`。
-命令用 **`govctl`** 二进制（已装在 `/usr/local/bin/govctl`）——注意不是 `cargo run`。
-
-核心法则（来自 govctl 治理模型，对本项目同样适用）：
-
-- **RFC 至上**：与 normative RFC 冲突的代码是 bug。不要静默偏离——要么改代码，要么提 RFC 修订。
-- **阶段纪律**：`spec → impl → test → stable`，禁止跳过。新功能在 RFC 进入 normative 前不得开始实现。
-- **不静默发明**：行为未定义或有歧义时，升级 / 提 issue，不要自己编。
-- **产物职责**：RFC 定义「必须满足什么」（normative），ADR 解释「为什么这样选」，Work Item 跟踪「这个任务在干什么」。不要混用。
-
-常用命令：
-
-```bash
-govctl status            # 项目概览
-govctl check             # 校验所有治理产物（提交前必跑）
-govctl search <query>    # 检索治理产物
-govctl rfc|adr|work new "Title"
-govctl work list
-```
-
-> 注意：govctl 仓库自身的 `AGENTS.md`（`/models/share/userdata/cb/govctl/`）是它**作为 Rust 项目的开发指南**，
-> 其中 `cargo run`、`src/`、Cargo 等内容**不适用**于 AscendFast，不要照搬。
