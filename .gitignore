@@ -1,9 +1,11 @@
 model/
 adaptations/
-adapations/
 runs/
 .venv/
 .uv-cache/
 .python-version
 .govctl.lock
 .govctl/
+data/
+profile/
+workspace/
