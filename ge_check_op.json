@@ -1,0 +1,41 @@
+{
+    "graph_id": 0,
+    "op": [
+        {
+            "error_type": "infer_shape_error",
+            "input0": {
+                "data_type": "DT_FLOAT16",
+                "layout": "ND",
+                "shape": [
+                    0
+                ]
+            },
+            "input1": {
+                "data_type": "DT_FLOAT16",
+                "layout": "ND",
+                "shape": [
+                    1,
+                    2,
+                    2,
+                    64
+                ]
+            },
+            "input2": {
+                "data_type": "DT_INT64",
+                "layout": "ND",
+                "shape": []
+            },
+            "name": "ConcatV2_4",
+            "output0": {
+                "data_type": "DT_FLOAT16",
+                "layout": "ND",
+                "shape": [
+                    0
+                ]
+            },
+            "reason": "InferShapeFailed!",
+            "type": "ConcatV2"
+        }
+    ],
+    "session_id": 0
+}

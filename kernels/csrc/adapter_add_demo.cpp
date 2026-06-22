@@ -64,11 +64,13 @@ at::Tensor add_demo(const at::Tensor& x, const at::Tensor& y) {
     TORCH_CHECK(ret == ACL_SUCCESS, "aclnnAddDemoGetWorkspaceSize failed: ", ret);
 
     // workspace 走 torch_npu 的 NPU 分配器（绑定当前流，自动随流回收）。
-    c10::DataPtr ws;
+    // 本机 torch_npu 2.7.1 导出的是 at_npu::native::allocate_workspace（返回
+    // at::Tensor 持有这块显存）；它必须存活到 aclnnAddDemo 执行完，故声明在外层。
+    at::Tensor ws;
     void* wsPtr = nullptr;
     if (wsSize > 0) {
-        ws = c10_npu::NPUWorkspaceAllocator::malloc_with_stream(wsSize, stream);
-        wsPtr = ws.get();
+        ws = at_npu::native::allocate_workspace(wsSize, stream);
+        wsPtr = ws.data_ptr();
     }
 
     // 第二段：真正下发到 device。
@@ -83,7 +85,7 @@ at::Tensor add_demo(const at::Tensor& x, const at::Tensor& y) {
 
 }  // namespace ascendfast
 
-// schema：与 add_demo 的输入输出一致。注册进 torch.ops.ascendfast.add_demo。
+// schema：与 add_demo 的输入输出一致。注册进 torch.ops.ascendfast.add_demo。(声明)
 TORCH_LIBRARY(ascendfast, m) {
     m.def("add_demo(Tensor x, Tensor y) -> Tensor");
 }

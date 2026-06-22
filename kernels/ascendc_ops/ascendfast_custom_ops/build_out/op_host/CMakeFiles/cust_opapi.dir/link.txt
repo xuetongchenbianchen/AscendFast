@@ -1,0 +1,1 @@
+/usr/bin/c++ -fPIC -shared -s -Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack -Wl,-soname,libcust_opapi.so -o libcust_opapi.so CMakeFiles/cust_opapi.dir/__/autogen/aclnn_add_demo.cpp.o   -L/usr/local/Ascend/cann-8.5.0/lib64  -Wl,-rpath,/usr/local/Ascend/cann-8.5.0/lib64: -lascendcl -lnnopbase

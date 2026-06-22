@@ -1,0 +1,56 @@
+{
+  "AddDemo": {
+    "dynamicRankSupport": true,
+    "simplifiedKeyMode": 0,
+    "optionalInputMode": "gen_placeholder",
+    "optionalOutputMode": "gen_placeholder",
+    "params": {
+      "inputs": [
+        {
+          "name": "x",
+          "index": 0,
+          "paramType": "required",
+          "formatMode": "static_nd_agnostic"
+        },
+        {
+          "name": "y",
+          "index": 1,
+          "paramType": "required",
+          "formatMode": "static_nd_agnostic"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "z",
+          "index": 0,
+          "paramType": "required",
+          "formatMode": "static_nd_agnostic"
+        }
+      ]
+    },
+    "binaryList": [
+      {
+        "coreType": 2,
+        "simplifiedKey": [
+          "AddDemo/d=0,p=1/0,2/0,2/0,2",
+          "AddDemo/d=0,p=0/0,2/0,2/0,2",
+          "AddDemo/d=1,p=1/0,2/0,2/0,2",
+          "AddDemo/d=1,p=0/0,2/0,2/0,2"
+        ],
+        "binPath": "ascend910_93/add_demo/AddDemo_d58661ffc141e782e1c3a4565b4023b3.o",
+        "jsonPath": "ascend910_93/add_demo/AddDemo_d58661ffc141e782e1c3a4565b4023b3.json"
+      },
+      {
+        "coreType": 2,
+        "simplifiedKey": [
+          "AddDemo/d=0,p=1/1,2/1,2/1,2",
+          "AddDemo/d=0,p=0/1,2/1,2/1,2",
+          "AddDemo/d=1,p=1/1,2/1,2/1,2",
+          "AddDemo/d=1,p=0/1,2/1,2/1,2"
+        ],
+        "binPath": "ascend910_93/add_demo/AddDemo_d6687bc497d24a97d769cd6b825c218e.o",
+        "jsonPath": "ascend910_93/add_demo/AddDemo_d6687bc497d24a97d769cd6b825c218e.json"
+      }
+    ]
+  }
+}

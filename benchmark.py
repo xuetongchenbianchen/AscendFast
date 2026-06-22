@@ -1,7 +1,7 @@
 """真实领域数据集上的离线 benchmark：测一个 ExecutionMode 的 forward（prefill）延迟。
 
-实现 [[ADR-0002]] 的「加速比标尺」一侧：用真实 ShareGPT 数据集裸计时（不走 profiler），
-其 mean 延迟是判定 2x 的唯一依据。通过 [[RFC-0001]] 的 build_model() 统一入口加载。
+实现 ADR-0002 的「加速比标尺」一侧：用真实 ShareGPT 数据集裸计时（不走 profiler），
+其 mean 延迟是判定 2x 的唯一依据。通过 RFC-0001 的 build_model() 统一入口加载。
 
 定位（与 profile_runner.run_profile 区分）：
 - run_profile        —— 用模拟数据 + torch_npu profiler 做**诊断**，产 top_kernels 等。

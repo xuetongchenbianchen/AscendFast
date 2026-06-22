@@ -1,1 +1,0 @@
-/usr/bin/c++ -fPIC -shared -Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack -Wl,-soname,libcust_opmaster_rt2.0.so -o libcust_opmaster_rt2.0.so CMakeFiles/cust_optiling.dir/add_demo.cpp.o   -L/usr/local/Ascend/ascend-toolkit/latest/lib64  -Wl,-rpath,/usr/local/Ascend/ascend-toolkit/latest/lib64 -lexe_graph -lregister -Wl,--whole-archive -ltiling_api -lrt2_registry -Wl,--no-whole-archive

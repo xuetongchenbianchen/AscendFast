@@ -15,8 +15,9 @@ import os
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
-# 本地 add_demo 算子工程的编译产物。
-_ADDDEMO = _HERE.parent / "ascendc_ops" / "add_demo" / "AddDemo" / "build_out"
+# 算子库工程(ascendfast_custom_ops:msopgen -lan cpp 生成的标准工程,所有自定义
+# 算子都加在这一个工程里)的编译产物目录。新增算子不需要改这里。
+_OPS_BUILD = _HERE.parent / "ascendc_ops" / "ascendfast_custom_ops" / "build_out"
 
 
 def _cann_home() -> Path:
@@ -41,11 +42,12 @@ def build():
     cann = _cann_home()
     tnpu = _torch_npu_dir()
 
-    aclnn_inc = _ADDDEMO / "op_api" / "include"      # aclnn_add_demo.h
-    opapi_lib = _ADDDEMO / "op_api" / "lib"            # libcust_opapi.so
+    # 工程 build.sh 的产物布局:aclnn 头在 autogen/,host 库在 op_host/。
+    aclnn_inc = _OPS_BUILD / "autogen"                 # aclnn_add_demo.h
+    opapi_lib = _OPS_BUILD / "op_host"                 # libcust_opapi.so
     for p in (aclnn_inc / "aclnn_add_demo.h", opapi_lib / "libcust_opapi.so"):
         if not p.exists():
-            raise RuntimeError(f"缺少算子产物：{p}（先在 AddDemo/ 下 build.sh）")
+            raise RuntimeError(f"缺少算子产物：{p}（先在 ascendfast_custom_ops/ 下 build.sh）")
     # __CONTINUE_HERE__
 
     include_dirs = [
@@ -65,7 +67,14 @@ def build():
     # torch_npu: getCurrentNPUStream / NPUWorkspaceAllocator。
     libraries = ["torch_npu", "cust_opapi", "ascendcl", "nnopbase"]
 
-    ext = load(
+    # 编译并安装到 ascendfast_ops/lib/ 目录
+    lib_dir = _HERE.parent / "src" / "ascendfast_ops" / "lib"
+    lib_dir.mkdir(exist_ok=True)
+
+    # is_python_module=False：adapter 不是 Python 模块（没有 PYBIND11_MODULE），
+    # 只靠 TORCH_LIBRARY 在加载时注册算子。这样 load 不会去找 PyInit_ 函数。
+    # 此模式下 load 返回 None，编译产物 .so 落在 torch 的扩展缓存目录里。
+    load(
         name="ascendfast_adapter_add_demo",
         sources=[str(_HERE / "adapter_add_demo.cpp")],
         extra_include_paths=include_dirs,
@@ -74,10 +83,23 @@ def build():
             + [f"-Wl,-rpath,{d}" for d in library_dirs]
             + [f"-l{l}" for l in libraries]
         ),
+        is_python_module=False,
         verbose=True,
     )
-    print(f"[build_adapter] built {ext.__file__}")
-    return ext
+
+    # 定位 load 编出的 .so（缓存目录: <ext_root>/<name>/<name>.so）。
+    from torch.utils.cpp_extension import _get_build_directory
+    build_dir = Path(_get_build_directory("ascendfast_adapter_add_demo", verbose=False))
+    so_path = build_dir / "ascendfast_adapter_add_demo.so"
+    if not so_path.exists():
+        raise RuntimeError(f"编译产物未找到: {so_path}")
+
+    # 复制编译好的 .so 到 lib/ 目录（import ascendfast_ops 时从这里加载）。
+    import shutil
+    target = lib_dir / so_path.name
+    shutil.copy2(so_path, target)
+    print(f"[build_adapter] built and installed: {target}")
+    return target
 
 
 if __name__ == "__main__":

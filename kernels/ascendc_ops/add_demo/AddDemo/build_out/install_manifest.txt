@@ -1,2 +1,0 @@
-/models/share/userdata/cb/AscendFast/kernels/ascendc_ops/add_demo/AddDemo/build_out/op_api/lib/libcust_opapi.so
-/models/share/userdata/cb/AscendFast/kernels/ascendc_ops/add_demo/AddDemo/build_out/op_api/include/aclnn_add_demo.h

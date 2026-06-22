@@ -1,0 +1,26 @@
+{
+  "componentGroups" : {},
+  "components" : {},
+  "errorOnAbsoluteInstallDestination" : false,
+  "formatVersionMajor" : 1,
+  "formatVersionMinor" : 0,
+  "installationTypes" : {},
+  "packageDescriptionFile" : "/models/share/userdata/cb/AscendFast/.venv/lib/python3.10/site-packages/cmake/data/share/cmake-4.3/Templates/CPack.GenericDescription.txt",
+  "packageDescriptionSummary" : "CPack opp project",
+  "packageName" : "opp",
+  "packageVersion" : "0.1.1",
+  "projects" : 
+  [
+    {
+      "component" : "ALL",
+      "components" : [],
+      "directory" : "/models/share/userdata/cb/AscendFast/kernels/ascendc_ops/add_demo/AddDemoStd/build_out",
+      "installationTypes" : [],
+      "projectName" : "opp",
+      "subDirectory" : "/"
+    }
+  ],
+  "setDestdir" : false,
+  "stripFiles" : false,
+  "warnOnAbsoluteInstallDestination" : false
+}

@@ -28,7 +28,27 @@
       "Bash(git add *)",
       "Bash(git commit *)",
       "Bash(git reset *)",
-      "Bash(git ls-tree *)"
+      "Bash(git ls-tree *)",
+      "Bash(.venv/bin/python -c \"import decorator; print\\('decorator', decorator.__version__, decorator.__file__\\)\")",
+      "Bash(.venv/bin/python -c \"import torch, torch_npu; print\\('ok'\\)\")",
+      "Bash(.venv/bin/python -c \"import decorator, sys; print\\('decorator', decorator.__version__\\)\")",
+      "Bash(uv add *)",
+      "Bash(.venv/bin/python -c \"import torchair\")",
+      "Bash(.venv/bin/pip show *)",
+      "Bash(.venv/bin/python -c \"import decorator; print\\('decorator', decorator.__version__\\)\")",
+      "Bash(grep -nA6 '\\\\[project.scripts\\\\]' pyproject.toml)",
+      "Bash(uv sync *)",
+      "Bash(git rm *)",
+      "Bash(rm -f _prof_wrap.sh)",
+      "Bash(head -c 1500 /models/share/userdata/cb/AscendFast/adaptations/Qwen2.5-0.5B-Instruct/baseline/benchmark/benchmark_report.json)",
+      "Bash(ls /models/share/userdata/cb/AscendFast/adaptations/Qwen2.5-0.5B-Instruct/baseline/patches)",
+      "Bash(bash *)",
+      "Bash(cat build.sh)",
+      "Bash(find build_out -maxdepth 1 -type f)",
+      "Bash(find . -name \"*.run\")",
+      "Bash(env -i bash --noprofile --norc -c ' *)",
+      "Bash(cd *)",
+      "Bash(rm -rf /root/.cache/torch_extensions/py310_cpu/ascendfast_adapter_add_demo)"
     ]
   }
 }

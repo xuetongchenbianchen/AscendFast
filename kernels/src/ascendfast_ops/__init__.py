@@ -9,19 +9,31 @@
 - workspace_loader 的 sys.modules 隔离只清理路径落在 workspace 内的模块，本包路径
   在 venv 里，因此整个 run 常驻、只注册一次（重复注册会撞 duplicate def 错）。
 
-两类实现走同一注册路径：
-- C1（当前）：纯 Python 占位实现，验证接入链路、当数值参考基线。
-- C2（目标）：加载编译好的 Ascend C 算子（lib/*.so），把同名 op 的 PrivateUse1
-  内核换成真 device kernel；Python 占位降级为 CPU/Meta 回退或删除。
-
-切换 C1→C2 只改各算子模块的实现体，**对外 schema 与调用点 `torch.ops.ascendfast.<op>`
-永不变**——这是整个结构可复用的关键。
+C2 实现：通过编译好的 C++ 适配层（.so）加载 Ascend C kernel。
+- 每个算子的适配层在 kernels/csrc/adapter_<op>.cpp
+- 编译脚本：kernels/csrc/build_adapter.py
+- import 本包时自动加载编译好的 .so，把算子注册进 PyTorch dispatcher
 """
 from __future__ import annotations
+import sys
+from pathlib import Path
 
-# 注册是 import 副作用：导入各算子模块即把它们登记进 dispatcher。
-# 新增算子时在此追加一行 import，保持"import 包 = 拿到全部算子"的契约。
-from . import my_linear as _my_linear  # noqa: F401
+# C2 算子：动态加载 lib/ 下所有编译好的 .so（每个 adapter_<op>.cpp 编一份）。
+# 编译：cd kernels && source /path/to/ascend-env.sh && python csrc/build_adapter.py
+# 自动遍历——加新算子只要把它的 .so 编进 lib/，无需改这里。
+_LIB_DIR = Path(__file__).parent / "lib"
+_adapter_sos = sorted(_LIB_DIR.glob("*.so"))
+
+if _adapter_sos:
+    # 加载 .so 会触发其中的 TORCH_LIBRARY / TORCH_LIBRARY_IMPL，把算子注册进
+    # PyTorch dispatcher。load_library 专门用于加载这种"非 Python 模块"的算子库。
+    import torch
+    for _so in _adapter_sos:
+        torch.ops.load_library(str(_so))
+else:
+    print(f"[ascendfast_ops] Warning: no *.so in {_LIB_DIR}. "
+          f"Run 'python kernels/csrc/build_adapter.py' to compile C2 kernels.",
+          file=sys.stderr)
 
 __all__ = ["registered_ops"]
 

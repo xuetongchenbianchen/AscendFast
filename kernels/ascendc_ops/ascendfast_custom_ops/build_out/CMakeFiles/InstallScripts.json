@@ -1,0 +1,11 @@
+{
+	"InstallScripts" : 
+	[
+		"/models/share/userdata/cb/AscendFast/kernels/ascendc_ops/add_demo/AddDemoStd/build_out/cmake_install.cmake",
+		"/models/share/userdata/cb/AscendFast/kernels/ascendc_ops/add_demo/AddDemoStd/build_out/framework/cmake_install.cmake",
+		"/models/share/userdata/cb/AscendFast/kernels/ascendc_ops/add_demo/AddDemoStd/build_out/framework/tf_plugin/cmake_install.cmake",
+		"/models/share/userdata/cb/AscendFast/kernels/ascendc_ops/add_demo/AddDemoStd/build_out/op_host/cmake_install.cmake",
+		"/models/share/userdata/cb/AscendFast/kernels/ascendc_ops/add_demo/AddDemoStd/build_out/op_kernel/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
