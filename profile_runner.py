@@ -24,11 +24,9 @@ from workspace_loader import load_build_model
 from profile_npu import (
     ProfileConfig,
     build_profile_report,
-    device_spec_for,
     profile_model,
-    _import_torch,
-    _release_device_memory,
 )
+from device_utils import device_spec_for, import_torch, release_device_memory
 
 _PROJECT_ROOT = Path(__file__).parent
 # profile 用的"模拟数据"：与真实领域 benchmark 数据集刻意区分开。
@@ -69,7 +67,7 @@ def _deterministic_profile(
     profile_mode: str = "forward",
     input_shape: tuple[int, ...] = (1, 512),
 ) -> ProfileResult:
-    torch = _import_torch()
+    torch = import_torch()
     model, tokenizer = load_build_model(mode)
     device, torch_npu = device_spec_for(model)       # 模型在哪就用哪，不二次搬运
     model = model.eval()
@@ -103,7 +101,7 @@ def _deterministic_profile(
     finally:
         # 本节点 profile 完即释放模型，防止递归深处显存累积 OOM。
         del model
-        _release_device_memory(torch, device.kind)
+        release_device_memory(torch, device.kind)
 
     latency = _to_float((report.get("latency_stats_ms") or {}).get("mean"))
     return ProfileResult(

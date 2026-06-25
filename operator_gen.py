@@ -91,6 +91,27 @@ def generate_operator(
         return None
 
 
+def _format_torch_reference(src: str | None) -> str:
+    """把 apply-agent 抽出的 torch 参考渲染进 prompt——它就是算子的 I/O 契约 + 数值 oracle。
+
+    这段 src 不是凭 semantic 现编的玩具，而是 apply-agent 从 build_model() 接线点**真实
+    要被替换掉的那段 eager 代码**抽出来的：它的 forward() 是要复现的精确语义，它的
+    get_inputs() 给出真实流经该点的形状/dtype。所以 operator-agent 要 (1) 按这里的
+    shape/dtype 设计 kernel 的 tiling 与签名，(2) exec 它、用 get_inputs() 造输入、用
+    Model.forward 在 fp32 上算 oracle 做数值自检——别再凭 semantic 字面重猜语义。
+    """
+    if not src:
+        return ""
+    return (
+        "torch_reference — the REAL eager code being replaced at the build_model() wiring\n"
+        "site, NOT a toy. Its forward() is the exact math to reproduce; its get_inputs()\n"
+        "yields the REAL shapes/dtypes that flow through that point. Design your kernel's\n"
+        "tiling/signature for THESE shapes/dtypes, and exec this as the fp32 numeric oracle\n"
+        "for your self-check (do NOT re-guess the math from `semantic`):\n"
+        f"```python\n{src}\n```\n"
+    )
+
+
 def _llm_generate_operator(
     spec: OperatorSpec,
     strategy: OptimizationStrategy,
@@ -113,6 +134,7 @@ def _llm_generate_operator(
         f"arch_params (specialize the kernel for THIS model): "
         f"{json.dumps(spec.arch_params, ensure_ascii=False)}\n"
         f"expected_signature: {spec.expected_signature or '(you decide)'}\n"
+        f"{_format_torch_reference(spec.torch_reference)}"
         f"{workspace_hint}"
         "## Profile context\n"
         f"model_id: {analysis.model_id or 'unknown'}\n"

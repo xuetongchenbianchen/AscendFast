@@ -1,5 +1,5 @@
-# analysis-agent role (WHERE time goes, no fixes) per [[ADR-0006]]; raises instead of
-# silently degrading when the agent runtime is unavailable, per [[ADR-0008]].
+# analysis-agent role (WHERE time goes, no fixes); raises instead of silently
+# degrading when the agent runtime is unavailable.
 from __future__ import annotations
 
 import json

@@ -1,7 +1,7 @@
 """正确性检验：判断一个优化后的 ExecutionMode 输出是否仍与 baseline 等价。
 
-实现 [[ADR-0003]]：每个 fork 都与 baseline 金标准比（非父 mode），指标为 last-token
-logits 余弦相似度，golden 缓存到 baseline workspace。通过 [[RFC-0001]] 入口加载。
+每个 fork 都与 baseline 金标准比（非父 mode），指标为 last-token
+logits 余弦相似度，golden 缓存到 baseline workspace。通过统一入口加载。
 
 定位（与 benchmark.py 对称）：
 - benchmark.py    —— 测一个 mode 跑得**多快**（forward 延迟）。
@@ -26,11 +26,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-from apply import _write_manifest
 from dataset import load_prompt_dataset, tokenize_prompts
 from models import ExecutionMode
+from mode_store import write_manifest
 from workspace_loader import load_build_model
-from profile_npu import device_spec_for, _import_torch, _release_device_memory, _synchronize
+from device_utils import device_spec_for, import_torch, release_device_memory, synchronize
 
 _PROJECT_ROOT = Path(__file__).parent
 # 正确性检验用的固定 prompt 集：与 benchmark 同源真实数据，口径一致。
@@ -67,7 +67,7 @@ def run_correctness_test(
     # baseline 自身按定义正确，直接放行（且其 golden 由首个 fork 触发缓存）。
     if mode.parent_uid is None:
         mode.correctness_passed = True
-        _write_manifest(mode)
+        write_manifest(mode)
         return mode
 
     ds_path = Path(dataset_path) if dataset_path else _CORRECTNESS_DATASET
@@ -77,7 +77,7 @@ def run_correctness_test(
             "先用 data/sharegpt_to_jsonl.py 从 ShareGPT 生成，或显式传 dataset_path。"
         )
 
-    torch = _import_torch()
+    torch = import_torch()
     golden = _ensure_golden(
         torch, baseline_mode, ds_path,
         max_samples=max_samples, max_input_tokens=max_input_tokens,
@@ -94,7 +94,7 @@ def run_correctness_test(
     extra["correctness"] = {"metric": "last_token_logits_cosine",
                             "score": round(float(score), 6), "threshold": threshold}
     mode.extra = extra
-    _write_manifest(mode)
+    write_manifest(mode)
     return mode
 
 
@@ -165,7 +165,7 @@ def _last_token_logits(
     with torch.no_grad():
         out = model(**inputs)
         logits = out.logits if hasattr(out, "logits") else out[0]
-    _synchronize(torch, device.kind)
+    synchronize(torch, device.kind)
 
     # 每条样本最后一个有效 token 的位置：优先用 attention_mask，否则取末列。
     mask = inputs.get("attention_mask")
@@ -179,7 +179,7 @@ def _last_token_logits(
     result = last.float().cpu()                          # 先把要留的搬到 CPU
     # 设备上的 model/out/logits 用完即释放，避免与 golden 计算同时在显存里压两份模型。
     del model, out, logits, last
-    _release_device_memory(torch, device.kind)
+    release_device_memory(torch, device.kind)
     return result
 
 

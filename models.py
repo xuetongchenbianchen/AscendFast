@@ -1,6 +1,6 @@
-# Data entities. LEVER_KINDS is the single source of truth per [[ADR-0005]];
-# ExecutionMode + ChangeRecord realize the workspace model of [[ADR-0004]] /
-# [[RFC-0001]]; StageOutcome + RunLedger realize the observability layer of [[ADR-0007]].
+# Data entities. LEVER_KINDS is the single source of truth for optimization levers;
+# ExecutionMode + ChangeRecord realize the workspace model; StageOutcome + RunLedger
+# realize the observability layer.
 from __future__ import annotations
 from dataclasses import dataclass, field
 
@@ -85,24 +85,30 @@ class OptimizationStrategy:
 
 
 # --------------------------------------------------------------------------- #
-# 自定义算子的请求/产物：坐在 strategy 与 apply 之间，由 operator-agent 消费/产出。
+# 自定义算子的请求/产物：坐在 apply 的两阶段之间，由 operator-agent 消费/产出。
 #
 # 拆分动机：apply-agent 的 HOW 其实混了两种性质迥异的事——「写 AscendC kernel +
 # 编译 + 装进 CANN」(分钟级、要编译、改全局)和「把算子接进 build_model()」(秒级、
-# 只动 workspace)。OperatorSpec/Artifact 把前者从 apply 里剥出来交给 operator-agent：
-# strategy 只在判断「官方无合适融合算子」时给一个 spec(WHAT/WHY)，operator-agent 据
-# 此产出一个已注册、已数值自检的 torch.ops.ascendfast.<op>，apply 像消费官方 npu_*
-# 一样消费这个 artifact。operator 生成失败 ≠ strategy 失败：artifact 缺省为 None，
-# apply 退回官方/eager 算子，绝不阻断主链。
+# 只动 workspace)。OperatorSpec/Artifact 把前者从 apply 里剥出来交给 operator-agent。
+#
+# 谁产 spec：spec 的作者是 **apply-agent**，不是 strategy。理由——
+# strategy 只看得到 profile 的热点算子名，看不到真实 forward 源码/真实 dtype/shape；
+# apply-agent fork 出 workspace 后能读真实代码与 model/config.json，产出的 spec 带准确
+# 的 arch_params 和一段可执行的 torch_reference(数值金标准)。所以流程是两阶段握手：
+# apply(phase1) 读代码→发布 OperatorSpec → operator-agent 据此 design+compile+install+
+# 数值自检 → apply(phase2) 把已验证的 OperatorArtifact 接进 build_model()。strategy 仍
+# 可在 extra.custom_operator 里给一个「提示」，但采不采纳由 apply-agent 读完真实代码定。
+# operator 生成失败 ≠ strategy 失败：artifact 缺省为 None，apply 退回官方/eager 算子。
 # --------------------------------------------------------------------------- #
 @dataclass
 class OperatorSpec:
-    """strategy → operator-agent 的请求：要一个什么样的自定义算子，及为什么官方不够。
+    """apply-agent(phase1) → operator-agent 的请求：要一个什么算子，及为什么官方不够。
 
     WHAT/WHY 级别，不含 kernel 实现细节(那是 operator-agent 的 HOW)。arch_params 是
-    从本模型架构(workspace 的 model/config.json)抽出的特化参数(hidden_size /
+    apply-agent 从本模型架构(workspace 的 model/config.json)读出的特化参数(hidden_size /
     num_heads / head_dim / dtype / eps ...)，让 operator-agent 能为「本模型」而非
-    「通用情况」特化 kernel——这正是自定义算子相对官方通用算子的价值来源。
+    「通用情况」特化 kernel——这正是自定义算子相对官方通用算子的价值来源。torch_reference
+    是 apply-agent 从真实 forward 抽出的一段可执行参考，给 operator-agent 当数值 oracle。
     """
     op_name: str                        # 期望的算子名(下划线小写，如 rms_norm_residual)，
                                         #  最终注册为 torch.ops.ascendfast.<op_name>
@@ -111,8 +117,12 @@ class OperatorSpec:
     fusion_targets: list[str] = field(default_factory=list)  # 想融进一个 kernel 的算子序列
     arch_params: dict = field(default_factory=dict)          # 本模型架构特化参数
     expected_signature: str | None = None                    # 期望调用签名(自然语言/伪签名)
-    source_strategy_uid: str | None = None
-    source_analysis_uid: str | None = None
+    torch_reference: str | None = None  # 算子的 I/O 契约 + 数值金标准：一段自包含 torch
+                                        #  参考(class Model + get_inputs)，由 apply-agent 从
+                                        #  build_model() 接线点**真实要被替换掉的那段 eager
+                                        #  代码**抽出——forward 是精确语义，get_inputs 给出真实
+                                        #  流经该点的 shape/dtype。operator-agent 据此设计 kernel
+                                        #  的 tiling/签名，并 exec 它当 oracle 做数值自检。
 
 
 @dataclass

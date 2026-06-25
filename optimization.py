@@ -1,12 +1,12 @@
-# Orchestrator. Implements [[ADR-0001]] (unified recursive node, no first-round
-# special case), [[ADR-0002]] (benchmark latency judges 2x, profile only diagnoses),
-# and [[ADR-0003]] (correctness vs baseline golden, threaded as baseline_mode).
+# Orchestrator. Unified recursive node (no first-round special case); benchmark
+# latency judges 2x while profile only diagnoses; correctness is checked against
+# the baseline golden, threaded through as baseline_mode.
 from __future__ import annotations
 
 import time
 
 from analysis import analyze_profile
-from apply import apply_optimization, ensure_baseline_mode
+from apply import apply_discover, apply_wire, ensure_baseline_mode
 from benchmark import run_real_benchmark
 from correctness import run_correctness_test
 from models import ExecutionMode, OperatorSpec, RunLedger
@@ -121,15 +121,30 @@ def optimize(
     for i, strategy in enumerate(strategies[:top_k]):
         print(f"{indent}  ⚙️  apply [{i+1}/{min(len(strategies), top_k)}]: {strategy.uid}")
 
-        # ②.5 自定义算子（可选）：strategy 在 extra.custom_operator 里点名「官方无合适算子、
-        # 想要一个自定义/融合 kernel」时，先请 operator-agent 把它 design+compile+install+
-        # 数值自检出来，产出一个已验证的 OperatorArtifact 传给 apply。算子生成失败 ≠ 策略
-        # 失败：gate 不过就把 artifact 置 None，apply 退回官方/eager 算子继续——kernel 是
-        # 高风险产物，绝不阻断主链。串行执行（算子编译共享 build_out/ 与全局安装路径，
-        # 不可并行），正好嵌在本就串行的策略循环里。
-        operator_artifact = None
-        op_spec = (strategy.extra or {}).get("custom_operator")
-        if op_spec:
+        # 两阶段握手：apply-agent 无法直接调 operator-agent，由这里中介。
+        #   ① apply_discover：fork + 让 apply-agent 读真实代码后二选一——直接改完，或
+        #      请求一个自定义算子（返回 phase=operator_pending 的 mode，extra 挂 spec）。
+        #   ② 若请求了算子：operator stage 生成+数值自检，gate_operator 把关。
+        #   ③ apply_wire：在同一个已 fork 的 workspace 上把已验证算子接进 build_model()。
+        # 算子是高风险产物：生成失败 ≠ 策略本身不可行，但 pending mode 没有 ChangeRecord，
+        # 接不上就只能弃用这条策略（不递归进一个"没真改"的 mode）。串行执行，正好嵌在
+        # 本就串行的策略循环里（算子编译共享 build_out/ 与全局安装路径，不可并行）。
+
+        # ① discover
+        with stage(ledger, "apply_discover", base_mode.uid) as st:
+            st.value = apply_discover(strategy, base_mode)
+            if st.value is None:
+                st.fail("apply_discover returned no ExecutionMode")
+            else:
+                st.metadata = {"phase": (st.value.extra or {}).get("phase")}
+        if not st.ok:
+            print(f"{indent}    ❌ apply(discover) 失败，跳过")
+            continue
+        child = st.value
+
+        # ②+③ 仅当 apply-agent 在 discover 阶段请求了自定义算子
+        if (child.extra or {}).get("phase") == "operator_pending":
+            op_spec = (child.extra or {}).get("pending_operator_spec") or {}
             print(f"{indent}    🔧 generate custom operator: {op_spec.get('op_name')}")
             with stage(ledger, "operator", base_mode.uid) as st:
                 st.value = generate_operator(
@@ -138,31 +153,44 @@ def optimize(
                 ok, reason = gate_operator(st.value)
                 if not ok:
                     st.fail(reason)
-            if st.ok:
-                operator_artifact = st.value
-                print(f"{indent}    ✅ custom op ready: {operator_artifact.qualified_name}")
-            else:
-                print(f"{indent}    ⚠️  custom op unavailable ({st.reason}); apply falls back to official op")
+            if not st.ok:
+                print(f"{indent}    ⚠️  custom op unavailable ({st.reason}); 弃用此策略")
+                continue
+            operator_artifact = st.value
+            print(f"{indent}    ✅ custom op ready: {operator_artifact.qualified_name}")
 
-        # apply：fork + agent 叠加优化。gate_apply 拦下 None-record（agent 失败），
-        # 这次没产出可叠加的优化就跳过，不再递归进一个"没真改"的 mode。
-        with stage(ledger, "apply", base_mode.uid) as st:
-            st.value = apply_optimization(strategy, base_mode, operator_artifact)
-            ok, reason = gate_apply(st.value, base_mode)
-            if not ok:
-                st.fail(reason)
-            else:
-                # 按-lever 归因：strategy 想要的 vs apply 实际落的（不加 ledger 字段，
-                # 复用 StageOutcome.metadata）。两者不一致即暴露 strategy↔apply 的偏差。
-                st.metadata = {
-                    "strategy_kind": (strategy.extra or {}).get("kind"),
-                    "applied_kind": st.value.change_log[-1].kind,
-                    "custom_op": operator_artifact.qualified_name if operator_artifact else None,
-                }
-        if not st.ok:
-            print(f"{indent}    ❌ apply 失败，跳过")
-            continue
-        child = st.value
+            with stage(ledger, "apply_wire", base_mode.uid) as st:
+                st.value = apply_wire(strategy, child, operator_artifact)
+                ok, reason = gate_apply(st.value, base_mode)
+                if not ok:
+                    st.fail(reason)
+                else:
+                    st.metadata = {
+                        "strategy_kind": (strategy.extra or {}).get("kind"),
+                        "applied_kind": st.value.change_log[-1].kind,
+                        "custom_op": operator_artifact.qualified_name,
+                    }
+            if not st.ok:
+                print(f"{indent}    ❌ apply(wire) 失败，跳过")
+                continue
+            child = st.value
+        else:
+            # apply-agent 直接用官方/eager 改完：discover 已含 ChangeRecord + 过了 forward
+            # gate，这里只补 gate_apply（日志增长判定）与按-lever 归因，不再二次调 agent。
+            with stage(ledger, "apply", base_mode.uid) as st:
+                st.value = child
+                ok, reason = gate_apply(child, base_mode)
+                if not ok:
+                    st.fail(reason)
+                else:
+                    st.metadata = {
+                        "strategy_kind": (strategy.extra or {}).get("kind"),
+                        "applied_kind": child.change_log[-1].kind,
+                        "custom_op": None,
+                    }
+            if not st.ok:
+                print(f"{indent}    ❌ apply 失败，跳过")
+                continue
 
         print(f"{indent}    🧪 correctness test ...")
         with stage(ledger, "correctness", child.uid) as st:

@@ -1,6 +1,6 @@
-# strategy-agent role (WHAT/WHY, names a lever, no code) per [[ADR-0006]]; levers come
-# from the LEVER_KINDS single source of truth ([[ADR-0005]]); raises rather than
-# degrading to an empty list when the agent runtime is unavailable ([[ADR-0008]]).
+# strategy-agent role (WHAT/WHY, names a lever, no code); levers come from the
+# LEVER_KINDS single source of truth; raises rather than degrading to an empty
+# list when the agent runtime is unavailable.
 from __future__ import annotations
 
 import json
@@ -47,24 +47,28 @@ def _llm_generate_optimization_strategies(
         f"op_type_totals: {json.dumps(analysis.op_type_totals, ensure_ascii=False)}\n"
         f"roofline_summary: {json.dumps(analysis.roofline_summary, ensure_ascii=False)}\n"
         f"profile_findings: {json.dumps(analysis.profile_findings or [], ensure_ascii=False)}\n\n"
+        # 
         "Each strategy must name a lever in `kind` (the build_model layer it touches):\n"
         "  forward_patch   — monkey-patch one nn.Module.forward (narrowest, single op)\n"
         "  operator_fusion — flip a config flag / attn_implementation to a fused backend\n"
         "  graph_rewrite   — wrap the whole model (torch.compile / NPU graph mode)\n"
         "  loading_time    — one-off at load (weight ND→NZ, dtype cleanup, static KV cache, padding)\n"
+        # 
         "Beyond the official torch_npu.npu_* fused ops, a project-local custom operator\n"
         "library `torch.ops.ascendfast.*` (the kernels/ package) is also available: when a\n"
-        "hot op has NO suitable official fused implementation, you MAY propose replacing it\n"
-        "with a custom AscendC kernel. This is still a forward_patch or operator_fusion lever\n"
-        "(it just swaps in a different op) — say WHAT/WHY only, never the HOW; the apply step\n"
-        "decides whether such a kernel exists or must be written.\n"
-        "When (and ONLY when) a custom kernel is genuinely warranted — the official op is\n"
-        "missing OR a multi-op fusion the official library does not offer (e.g. RMSNorm+residual,\n"
-        "RoPE+attention, QKV+bias) would cut launch/cast overhead — attach a `custom_operator`\n"
-        "spec to that strategy. Do NOT attach one when an official fused op already covers the\n"
-        "hot op well (a hand-written kernel rarely beats a tuned official single-op kernel).\n"
-        "The spec is WHAT/WHY for an operator-agent that will design+compile+verify the kernel\n"
-        "BEFORE apply runs; the operator-agent reads the model's own config for arch params.\n"
+        "hot op has NO suitable official fused implementation, a custom AscendC kernel MAY be\n"
+        "worth writing. This is still a forward_patch or operator_fusion lever (it just swaps\n"
+        "in a different op) — say WHAT/WHY only, never the HOW.\n"
+        "You only see profile hotspot NAMES, not the real forward code. The apply step DOES\n"
+        "read the real code and makes the final call on whether a custom kernel is warranted\n"
+        "and what its exact signature/arch params are. So a `custom_operator` you attach here\n"
+        "is only a HINT to the apply step, not a command. Attach one (and ONLY one per strategy)\n"
+        "when a multi-op fusion the official library lacks would plausibly cut launch/cast\n"
+        "overhead (e.g. RMSNorm+residual, RoPE+attention, QKV+bias). Do NOT attach one when an\n"
+        "official fused op already covers the hot op well (a hand-written kernel rarely beats a\n"
+        "tuned official single-op kernel). Provide WHAT/WHY only — the apply step (which reads\n"
+        "the model's own config and real forward) refines it into the actual operator request.\n"
+        # 
         "Do NOT default to forward_patch; across the candidates cover at least two distinct kinds.\n\n"
         "Return JSON:\n"
         '{"strategies": [{"focus": "<bottleneck + target mechanism, one line>", '
@@ -94,11 +98,10 @@ def _llm_generate_optimization_strategies(
         # lever 规范化到 LEVER_KINDS：未指定/未知值默认 forward_patch（最窄、最低风险）。
         raw_kind = str(item.get("kind") or "").strip()
         kind = raw_kind if raw_kind in LEVER_KINDS else "forward_patch"
-        # 可选 custom_operator spec：仅在 agent 判断「官方无合适算子」时附带。规范化成
-        # 一个干净 dict 存进 extra；optimization 据它决定要不要先跑 operator stage。
-        custom_op = _normalize_custom_operator(
-            item.get("custom_operator"), analysis, f"strategy:{analysis.uid}:{len(strategies) + 1}"
-        )
+        # 可选 custom_operator：仅在 agent 凭热点判断「官方可能无合适算子」时附带。规范化成
+        # 一个干净 dict 存进 extra，apply-agent(discover) 把它当“提示”读（采不采纳由它读完
+        # 真实代码定）。spec 的权威作者是 apply-agent，不是这里。
+        custom_op = _normalize_custom_operator(item.get("custom_operator"))
         strategies.append(
             OptimizationStrategy(
                 uid=f"strategy:{analysis.uid}:{len(strategies) + 1}",
@@ -107,28 +110,24 @@ def _llm_generate_optimization_strategies(
                 prompt_instruction=_build_strategy_prompt(analysis, focus, measures, kind),
                 extra={
                     "kind": kind,
-                    "source_analysis_uid": analysis.uid,
                     "model_id": analysis.model_id,
                     "device_kind": analysis.device_kind,
                     "device_name": analysis.device_name,
                     "dtype": analysis.dtype,
-                    "custom_operator": custom_op,   # None 或一个 spec dict
+                    "custom_operator": custom_op,   # None 或一个 hint dict
                 },
             )
         )
     return strategies if strategies else None
 
 
-def _normalize_custom_operator(
-    raw: object,
-    analysis: AnalysisResult,
-    strategy_uid: str,
-) -> dict | None:
-    """把 agent 给的 custom_operator 字段规范化成一个干净 spec dict（缺/坏则 None）。
+def _normalize_custom_operator(raw: object) -> dict | None:
+    """把 agent 给的 custom_operator 规范化成一个干净 hint dict（缺/坏则 None）。
 
-    存的是 dict 而非 OperatorSpec 实例，让 OptimizationStrategy.extra 保持可 JSON 序列化
-    （manifest/ledger 落盘）；optimization 在要用时再 OperatorSpec(**spec) 物化。op_name
-    与 semantic 是底线，缺任一就当没提（返回 None，走官方算子路径）。
+    存 dict 而非 OperatorSpec 实例，让 OptimizationStrategy.extra 保持可 JSON 序列化
+    （manifest/ledger 落盘）。这只是给 apply-agent 的“提示”——op_name 与 semantic 是底线，
+    缺任一就当没提（返回 None）。权威 spec 由 apply-agent 读真实代码后产出，所以这里不带
+    arch_params / torch_reference 这类需要真实代码才填得准的字段。
     """
     if not isinstance(raw, dict):
         return None
@@ -144,8 +143,6 @@ def _normalize_custom_operator(
         "fusion_targets": [str(t) for t in fusion] if isinstance(fusion, list) else [],
         "expected_signature": (str(raw["expected_signature"]).strip()
                                if raw.get("expected_signature") else None),
-        "source_strategy_uid": strategy_uid,
-        "source_analysis_uid": analysis.uid,
     }
 
 

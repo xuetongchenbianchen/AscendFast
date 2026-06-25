@@ -1,7 +1,7 @@
 """verify：把每个环节"已经在做但形态不一"的成败判断，收敛成一个 StageOutcome
 
-实现 [[ADR-0007]] 的可观测层：stage() 吞异常落成 StageOutcome、gate_* 纯函数门禁、
-RunLedger 落盘决策轨迹。gate_apply 与 apply 的运行 forward gate（[[ADR-0008]]）配合。
+可观测层：stage() 吞异常落成 StageOutcome、gate_* 纯函数门禁、
+RunLedger 落盘决策轨迹。gate_apply 与 apply 的运行 forward gate 配合。
 + 一个 stage() 机制记录下来；门禁是喂给它的纯函数。
 
 不发明新观测层。这里只做三件事，全部围绕 RunLedger / StageOutcome 两个实体：
@@ -40,10 +40,6 @@ _CURRENT_LEDGER: RunLedger | None = None
 def set_current_ledger(ledger: RunLedger | None) -> None:
     global _CURRENT_LEDGER
     _CURRENT_LEDGER = ledger
-
-
-def current_ledger() -> RunLedger | None:
-    return _CURRENT_LEDGER
 
 
 # --------------------------------------------------------------------------- #
@@ -149,7 +145,7 @@ def record_agent_call(agent_name: str, status: str, detail: str = "") -> None:
     """记一条 agent_call StageOutcome。status: ok|disabled|timeout|subprocess_error|
     unexpected|agent_error|bad_json。ok=(status=="ok")；永不抛异常、永不影响调用方的
     None 契约。"""
-    _record(current_ledger(), StageOutcome(
+    _record(_CURRENT_LEDGER, StageOutcome(
         stage="agent_call",
         ok=(status == "ok"),
         reason="" if status == "ok" else f"{status}: {detail}".strip(": "),

@@ -1,7 +1,7 @@
 """真实领域数据集上的离线 benchmark：测一个 ExecutionMode 的 forward（prefill）延迟。
 
-实现 ADR-0002 的「加速比标尺」一侧：用真实 ShareGPT 数据集裸计时（不走 profiler），
-其 mean 延迟是判定 2x 的唯一依据。通过 RFC-0001 的 build_model() 统一入口加载。
+「加速比标尺」一侧：用真实 ShareGPT 数据集裸计时（不走 profiler），
+其 mean 延迟是判定 2x 的唯一依据。通过 build_model() 统一入口加载。
 
 定位（与 profile_runner.run_profile 区分）：
 - run_profile        —— 用模拟数据 + torch_npu profiler 做**诊断**，产 top_kernels 等。
@@ -35,12 +35,12 @@ from typing import Any
 from dataset import load_prompt_dataset, tokenize_prompts
 from models import ExecutionMode
 from workspace_loader import load_build_model
-from profile_npu import (
+from device_utils import (
     device_spec_for,
-    _import_torch,
-    _release_device_memory,
-    _run_forward,
-    _synchronize,
+    import_torch,
+    release_device_memory,
+    run_forward,
+    synchronize,
 )
 
 _PROJECT_ROOT = Path(__file__).parent
@@ -87,7 +87,7 @@ def run_real_benchmark(
             "先用 data/sharegpt_to_jsonl.py 从 ShareGPT 生成，或显式传 dataset_path。"
         )
 
-    torch = _import_torch()
+    torch = import_torch()
     model, tokenizer = load_build_model(mode)
     device, _ = device_spec_for(model)               # 模型在哪就用哪，不二次搬运
     model = model.eval()
@@ -113,18 +113,11 @@ def run_real_benchmark(
     finally:
         # 本节点用完即释放：不然递归深处每个父帧都还压着一个模型，显存只增不减。
         del model
-        _release_device_memory(torch, device.kind)
+        release_device_memory(torch, device.kind)
 
     if stats["mean"] <= 0.0:
         raise RuntimeError("benchmark produced non-positive latency.")
     return stats["mean"]
-
-
-def speedup(baseline_mode: ExecutionMode, optimized_mode: ExecutionMode, **kwargs) -> float:
-    """便捷函数：在同一数据集/配置下测两端，返回 baseline/optimized 加速比（>1 更快）。"""
-    base = run_real_benchmark(baseline_mode, **kwargs)
-    opt = run_real_benchmark(optimized_mode, **kwargs)
-    return base / opt if opt > 0 else 0.0
 
 
 # --------------------------------------------------------------------------- #
@@ -143,13 +136,13 @@ def _time_forward(
     samples_ms: list[float] = []
     with torch.no_grad():
         for _ in range(max(warmup_iters, 0)):
-            _run_forward(model, inputs)
-            _synchronize(torch, device_kind)
+            run_forward(model, inputs)
+            synchronize(torch, device_kind)
         for _ in range(max(bench_iters, 1)):
-            _synchronize(torch, device_kind)        # 隔离上一轮残留
+            synchronize(torch, device_kind)        # 隔离上一轮残留
             started = time.perf_counter()
-            _run_forward(model, inputs)
-            _synchronize(torch, device_kind)        # 等 NPU 真正算完再停表
+            run_forward(model, inputs)
+            synchronize(torch, device_kind)        # 等 NPU 真正算完再停表
             samples_ms.append((time.perf_counter() - started) * 1000.0)
     return samples_ms
 
