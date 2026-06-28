@@ -13,7 +13,6 @@ import importlib
 import importlib.util
 import inspect
 import json
-import math
 import os
 import re
 import sys
@@ -667,7 +666,7 @@ def generate_input(torch: Any, model: Any, input_shape: tuple[int, ...], dtype: 
         return {"input_ids": torch.randint(0, _vocab_size(model), (batch, seq_len), device=device, dtype=torch.long)}
     return {"x": torch.randn(*input_shape, device=device, dtype=dtype)}
 
-
+# 推理模式路由器
 def _run_profile_step(model: Any, inputs: dict[str, Any], config: ProfileConfig) -> None:
     if config.profile_mode == "forward":
         run_forward(model, inputs)
@@ -763,17 +762,25 @@ def _build_npu_profile_kwargs(torch_npu: Any, config: ProfileConfig) -> dict[str
     activities = [torch_npu.profiler.ProfilerActivity.NPU]
     if level in {"L1", "L2"}:
         activities.insert(0, torch_npu.profiler.ProfilerActivity.CPU)
-
+    # 兼容不同版本的 torch_npu
     try:
-        schedule = torch_npu.profiler.schedule(wait=0, warmup=0, active=config.profile_iters, repeat=1, skip_first=config.skip_first)
+        schedule = torch_npu.profiler.schedule(wait=0, 
+                                               warmup=0, 
+                                               active=config.profile_iters, 
+                                               repeat=1, 
+                                               skip_first=config.skip_first)
     except TypeError:
-        schedule = torch_npu.profiler.schedule(wait=0, warmup=0, active=config.profile_iters, repeat=1)
+        schedule = torch_npu.profiler.schedule(wait=0, 
+                                               warmup=0, 
+                                               active=config.profile_iters, 
+                                               repeat=1)
 
     kwargs: dict[str, Any] = {
         "activities": activities,
         "schedule": schedule,
         "on_trace_ready": torch_npu.profiler.tensorboard_trace_handler(str(config.profiler_output_dir)),
     }
+
     if level in {"L1", "L2"}:
         kwargs["record_shapes"] = config.record_shapes if config.record_shapes is not None else True
         kwargs["with_stack"] = level == "L2"
@@ -808,25 +815,113 @@ def _build_torch_profile_kwargs(torch: Any, config: ProfileConfig, device: Devic
     return kwargs
 
 
-def profile_model(
+def _warmup_phase(
     model: Any,
     inputs: dict[str, Any],
-    *,
     config: ProfileConfig,
+    torch: Any,
     device: DeviceSpec,
-    torch_module: Any | None = None,
-    torch_npu: Any | None = None,
-) -> tuple[list[KernelRecord], dict[str, Any]]:
-    """Run warmup and profiler capture, returning aggregated device events."""
+) -> None:
+    """Warmup to eliminate cold-start overhead.
 
-    torch = torch_module or import_torch()
-    config.profiler_output_dir.mkdir(parents=True, exist_ok=True)
-
+    Runs the model several times without recording any metrics to ensure:
+    - Memory is allocated
+    - Kernels are compiled/selected
+    - Device drivers are initialized
+    """
     with torch.no_grad():
         for _ in range(config.warmup_iters):
             _run_profile_step(model, inputs, config)
             synchronize(torch, device.kind)
+    # Final sync to ensure warmup is completely done
+    synchronize(torch, device.kind)
 
+
+def _export_trace(prof: Any, config: ProfileConfig) -> Path | None:
+    """Export Chrome trace if supported and configured.
+
+    Returns:
+        Path to trace file if successful, None otherwise
+    """
+    if not config.export_trace or not hasattr(prof, "export_chrome_trace"):
+        return None
+
+    trace_path = config.profiler_output_dir / "trace.json"
+    try:
+        prof.export_chrome_trace(str(trace_path))
+        return trace_path
+    except Exception:
+        return None
+
+
+def _extract_kernel_records(
+    prof: Any,
+    device: DeviceSpec,
+    config: ProfileConfig,
+) -> list[KernelRecord]:
+    """Extract kernel records from profiler or fallback to CSV files.
+
+    Tries multiple sources in order:
+    1. profiler.key_averages() API
+    2. NPU kernel_details.csv (NPU only)
+    3. NPU op_statistic.csv (NPU only)
+
+    Returns:
+        List of KernelRecord sorted by device time (descending)
+    """
+    records: list[KernelRecord] = []
+
+    # Try profiler API first
+    if hasattr(prof, "key_averages"):
+        for evt in prof.key_averages(group_by_input_shape=True):
+            device_time_us = _event_device_time_us(evt, device.kind)
+            if device_time_us <= 0.0:
+                continue
+
+            name = str(getattr(evt, "key", "") or "")
+            if not name:
+                continue
+
+            records.append(
+                KernelRecord(
+                    name=name,
+                    op_type=classify_kernel(name),
+                    device_time_us=device_time_us,
+                    call_count=int(getattr(evt, "count", 1) or 1),
+                    input_shapes=_shape_string(getattr(evt, "input_shapes", "")),
+                )
+            )
+
+    # NPU fallback: try CSV files if profiler API returned nothing
+    if not records and device.kind == "npu":
+        records = _records_from_npu_kernel_details(config.profiler_output_dir)
+    if not records and device.kind == "npu":
+        records = _records_from_npu_op_statistic(config.profiler_output_dir)
+
+    records.sort(key=lambda r: r.device_time_us, reverse=True)
+    return records
+
+
+def _profiling_phase(
+    model: Any,
+    inputs: dict[str, Any],
+    config: ProfileConfig,
+    torch: Any,
+    device: DeviceSpec,
+    torch_npu: Any | None,
+) -> tuple[list[KernelRecord], dict[str, Any]]:
+    """Profiler collection for operator-level performance data and latency estimation.
+
+    Runs the profiler to collect kernel-level metrics using continuous submission
+    (no per-iteration sync) to better reflect async execution.
+
+    Latency is estimated from profiler's total device time, not from manual timing,
+    to avoid disrupting the async pipeline with frequent synchronization.
+
+    Returns:
+        Tuple of (kernel_records, profiler_artifacts)
+    """
+    # Select profiler based on device type
     if device.kind == "npu":
         if torch_npu is None:
             raise RuntimeError("torch_npu is required for NPU profiling.")
@@ -836,59 +931,76 @@ def profile_model(
         profile_factory = torch.profiler.profile
         profile_kwargs = _build_torch_profile_kwargs(torch, config, device)
 
+    # Run profiler
     with torch.no_grad():
         with profile_factory(**profile_kwargs) as prof:
-            measured_steps = config.profile_iters
-            total_steps = measured_steps + max(config.skip_first, 0) if device.kind == "npu" else measured_steps
-            latency_samples_ms: list[float] = []
-            for step_index in range(total_steps):
-                started = time.perf_counter()
+            # NPU may need extra skip_first steps
+            total_steps = config.profile_iters + max(config.skip_first, 0) \
+                          if device.kind == "npu" else config.profile_iters
+
+            for _ in range(total_steps):
                 _run_profile_step(model, inputs, config)
-                synchronize(torch, device.kind)
-                elapsed_ms = (time.perf_counter() - started) * 1000.0
-                if device.kind != "npu" or step_index >= max(config.skip_first, 0):
-                    latency_samples_ms.append(elapsed_ms)
                 if hasattr(prof, "step"):
                     prof.step()
 
-    trace_path: Path | None = None
-    if config.export_trace and hasattr(prof, "export_chrome_trace"):
-        trace_path = config.profiler_output_dir / "trace.json"
-        try:
-            prof.export_chrome_trace(str(trace_path))
-        except Exception:
-            trace_path = None
+            # Single sync at the end to ensure all operations complete
+            synchronize(torch, device.kind)
 
-    records: list[KernelRecord] = []
-    if hasattr(prof, "key_averages"):
-        for evt in prof.key_averages(group_by_input_shape=True):
-            device_time_us = _event_device_time_us(evt, device.kind)
-            if device_time_us <= 0.0:
-                continue
-            name = str(getattr(evt, "key", "") or "")
-            if not name:
-                continue
-            op_type = classify_kernel(name)
-            records.append(
-                KernelRecord(
-                    name=name,
-                    op_type=op_type,
-                    device_time_us=device_time_us,
-                    call_count=int(getattr(evt, "count", 1) or 1),
-                    input_shapes=_shape_string(getattr(evt, "input_shapes", "")),
-                )
-            )
-    if not records and device.kind == "npu":
-        records = _records_from_npu_kernel_details(config.profiler_output_dir)
-    if not records and device.kind == "npu":
-        records = _records_from_npu_op_statistic(config.profiler_output_dir)
+    # Export trace if configured
+    trace_path = _export_trace(prof, config)
 
-    records.sort(key=lambda item: item.device_time_us, reverse=True)
-    artifacts: dict[str, Any] = {"profiler_output_dir": str(config.profiler_output_dir)}
-    if latency_samples_ms:
-        artifacts["latency_samples_ms"] = [round(value, 6) for value in latency_samples_ms]
+    # Extract kernel records
+    records = _extract_kernel_records(prof, device, config)
+
+    # Build artifacts dict
+    artifacts: dict[str, Any] = {}
     if trace_path is not None:
         artifacts["trace_path"] = str(trace_path)
+
+    return records, artifacts
+
+
+def profile_model(
+    model: Any,
+    inputs: dict[str, Any],
+    *,
+    config: ProfileConfig,
+    device: DeviceSpec,
+    torch_module: Any | None = None,
+    torch_npu: Any | None = None,
+) -> tuple[list[KernelRecord], dict[str, Any]]:
+    """Run profiling to collect operator-level performance data.
+
+    This function focuses solely on identifying performance bottlenecks at the
+    operator level. For accurate end-to-end latency measurement, use benchmark.py
+    which runs without profiler overhead.
+
+    Workflow:
+    1. Warmup - eliminate cold-start overhead (not recorded)
+    2. Profiler collection - operator-level performance data
+
+    Returns:
+        Tuple of (kernel_records, artifacts_dict)
+        - kernel_records: sorted by device time (slowest first)
+        - artifacts_dict: profiler output paths and metadata
+    """
+    torch = torch_module or import_torch()
+    config.profiler_output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Warmup phase
+    _warmup_phase(model, inputs, config, torch, device)
+
+    # Profiler collection phase
+    records, profiler_artifacts = _profiling_phase(
+        model, inputs, config, torch, device, torch_npu
+    )
+
+    # Build final artifacts
+    artifacts: dict[str, Any] = {
+        "profiler_output_dir": str(config.profiler_output_dir),
+        **profiler_artifacts,
+    }
+
     return records, artifacts
 
 
@@ -964,47 +1076,6 @@ def _csv_count(value: Any) -> int:
     if count is None:
         return 1
     return max(int(count), 1)
-
-
-def _float_list(values: Any) -> list[float]:
-    if not isinstance(values, list):
-        return []
-    result: list[float] = []
-    for value in values:
-        numeric = _to_float(value)
-        if numeric is not None:
-            result.append(numeric)
-    return result
-
-
-def _latency_stats_ms(samples: list[float]) -> dict[str, Any]:
-    if not samples:
-        return {}
-    count = len(samples)
-    ordered = sorted(samples)
-    mean = sum(ordered) / count
-    minimum = ordered[0]
-    maximum = ordered[-1]
-    midpoint = count // 2
-    if count % 2:
-        median = ordered[midpoint]
-    else:
-        median = (ordered[midpoint - 1] + ordered[midpoint]) / 2.0
-    variance = sum((value - mean) ** 2 for value in samples) / count if count > 1 else 0.0
-    stddev = math.sqrt(variance)
-    coefficient_of_variation = (stddev / mean) if mean else 0.0
-    return {
-        "count": count,
-        "mean": round(mean, 6),
-        "median": round(median, 6),
-        "min": round(minimum, 6),
-        "max": round(maximum, 6),
-        "std": round(stddev, 6),
-        "stddev": round(stddev, 6),
-        "coefficient_of_variation": round(coefficient_of_variation, 8),
-        "range": round(maximum - minimum, 6),
-        "noise_relative": round(((maximum - minimum) / mean) if mean else 0.0, 8),
-    }
 
 
 def build_profile_report(
@@ -1084,10 +1155,7 @@ def build_profile_report(
     }
     if artifacts:
         report["artifacts"] = dict(artifacts)
-        latency_samples_ms = _float_list(artifacts.get("latency_samples_ms"))
-        if latency_samples_ms:
-            report["latency_samples_ms"] = [round(value, 6) for value in latency_samples_ms]
-            report["latency_stats_ms"] = _latency_stats_ms(latency_samples_ms)
+
     return report
 
 

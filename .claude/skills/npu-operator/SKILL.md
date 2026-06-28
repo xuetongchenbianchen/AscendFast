@@ -1,6 +1,6 @@
 ---
 name: npu-operator
-description: Design, compile, install, and register a custom AscendC operator into the torch.ops.ascendfast.* namespace on Ascend 910. Use whenever an OptimizationStrategy asks for a custom/fused NPU kernel that the official torch_npu.npu_* ops don't cover — writing op_host tiling + op_kernel device code, packaging a .run, installing it into CANN, compiling the PyTorch adapter .so, and numerically self-checking the result. Reach for this anytime you must produce a NEW torch.ops.ascendfast.<op> that callers can use like a stock fused op.
+description: Design, compile, install, and register a custom AscendC operator into the torch.ops.ascendfast.* namespace on Ascend 910. Use this skill whenever you need to create a custom/fused NPU kernel that official torch_npu.npu_* ops don't cover, implement multi-op fusion (RMSNorm+residual, RoPE+attention, QKV+bias), write AscendC device code, compile and install operators into CANN, or numerically verify custom kernels. Also use when the user mentions "custom operator", "AscendC kernel", "operator fusion", or asks to "implement a fused kernel".
 ---
 
 # NPU Custom Operator (AscendC)
@@ -13,19 +13,66 @@ description: Design, compile, install, and register a custom AscendC operator in
 > 你的交付物是一个**已编译、已安装、已数值验证**的 `torch.ops.ascendfast.<op>`，外加一条
 > 写进 `kernels/registry.json` 的记录。
 
-## 先判断：这个算子值得自己写吗
+## 高层决策：值得自己写吗？
 
-自定义算子的价值**不在于重写官方已有的算子**——实测我们手写的 per-row RMSNorm 比官方
-`torch_npu.npu_rms_norm` 慢约 4%（官方是华为深度手工调优的库算子，对齐/分块/调度都到位）。
-自己写**能赢的唯一场景**是官方没有的**融合**或**针对本模型的特化**：
+在开始编码前，先问三个问题：
 
-- **融合**：`RMSNorm+residual`、`RoPE+attention`、`QKV+bias`、`SwiGLU` 融成一个 kernel——
-  省掉中间张量的 GM 往返和 kernel launch。
-- **特化**：hidden_size、num_heads、eps、dtype 全部**编译期定死**，省掉通用算子的运行时
-  分支、shape 检查、多余 cast。
+### 1. 官方是否已有类似算子？
 
-如果策略让你重造一个官方已有的单算子（如裸 RMSNorm），先在 `usage_note` 里点明「官方已有
-更快实现」，仍可做（用于打通链路），但别指望性能超过官方。
+**检查方法**：
+```bash
+python -c "import torch_npu; print([x for x in dir(torch_npu) if 'npu_' in x and 'norm' in x.lower()])"
+```
+
+**决策**：
+- **有且功能匹配** → 不要重写，在 `usage_note` 里说明「官方 `torch_npu.npu_xxx` 更快」
+- **有但不支持融合** → 值得写融合版本（如官方有 RMSNorm 但无 RMSNorm+residual）
+- **完全没有** → 值得写
+
+### 2. 这是融合还是单算子？
+
+**自定义算子能赢的场景**：
+- ✅ **融合**：`RMSNorm+residual`、`RoPE+attention`、`QKV+bias`、`SwiGLU` 融成一个 kernel
+  - 收益：省掉中间张量的 GM 往返 + kernel launch overhead
+  - 预期加速：1.15-1.3×（针对被融合的部分）
+  
+- ✅ **特化**：hidden_size、num_heads、eps、dtype 编译期定死
+  - 收益：省掉通用算子的运行时分支、shape 检查
+  - 预期加速：1.05-1.1×（边际收益）
+
+**不能赢的场景**：
+- ❌ **重写官方单算子**：手写 RMSNorm 比官方 `npu_rms_norm` 慢 ~4%
+  - 原因：官方是华为深度手工调优的库算子，对齐/分块/调度都到位
+
+### 3. 融合的算子是否紧邻？
+
+**检查 OperatorSpec.torch_reference**：
+```python
+# 好的融合候选（算子紧邻，数据直通）
+class Model(nn.Module):
+    def forward(self, x, residual, gamma):
+        x = x + residual              # Add
+        return rms_norm(x, gamma)     # RMSNorm
+        # ↑ 中间结果不被其他地方用，可融合
+
+# 不好的融合候选（算子分离，中间有依赖）
+class Model(nn.Module):
+    def forward(self, x, residual, gamma):
+        x = x + residual
+        y = some_other_op(x)          # 中间结果被用了
+        return rms_norm(x, gamma)     # 无法简单融合
+```
+
+**决策树总结**：
+```
+官方有类似算子？
+├─ 有且功能匹配 → 不写，推荐官方版本
+└─ 无或不支持融合 → 继续
+    ├─ 是多算子融合？
+    │   ├─ 算子紧邻 → 值得写（预期 1.15-1.3×）
+    │   └─ 算子分离 → 不值得（复杂度高，收益低）
+    └─ 单算子特化 → 边际收益小（1.05-1.1×），优先级低
+```
 
 ## 全景：一个算子要凑齐两条独立的链
 

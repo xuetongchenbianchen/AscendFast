@@ -103,21 +103,11 @@ def _deterministic_profile(
         del model
         release_device_memory(torch, device.kind)
 
-    latency = _to_float((report.get("latency_stats_ms") or {}).get("mean"))
     return ProfileResult(
         uid=f"profile:{mode.uid}",
         execution_mode_uid=mode.uid,
-        latency_before=0.0,
-        latency_after=latency,
         profile_report=report,
         profile_report_path=str(cfg.output),
         profiler_output_dir=str(cfg.profiler_output_dir),
         extra={"source": "deterministic", "profile_mode": profile_mode},
     )
-
-
-def _to_float(value: object) -> float:
-    try:
-        return float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return 0.0

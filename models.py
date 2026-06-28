@@ -147,7 +147,6 @@ class OperatorArtifact:
 @dataclass
 class AnalysisResult:
     uid: str
-    total_latency: float
     top_ops: list[str]
     hot_groups: dict[str, list[str]]
     extra: dict | None = None
@@ -156,7 +155,6 @@ class AnalysisResult:
     device_name: str | None = None
     dtype: str | None = None
     profile_report_path: str | None = None
-    latency_stats_ms: dict | None = None
     dataset: dict | None = None
     top_kernels: list[dict] = field(default_factory=list)
     op_type_totals: dict[str, dict] = field(default_factory=dict)
@@ -186,10 +184,14 @@ class ExecutionMode:
 
 @dataclass
 class ProfileResult:
+    """Profile 的结果：算子级性能分析数据。
+
+    profile 只负责定位热点（算子占比、roofline），不产出延迟。
+    真实的 end-to-end 延迟由 benchmark.py 在自己的数据集上测量，
+    两者数据集口径不同，不可混用。
+    """
     uid: str
     execution_mode_uid: str
-    latency_before: float
-    latency_after: float
     extra: dict | None = None
     profile_report_path: str | None = None
     profiler_output_dir: str | None = None

@@ -71,16 +71,12 @@ def analyze_profile(
     #   "likely memory-bound": 0.078
     # }
     roofline_summary = _roofline_summary(top_kernels)
-    latency_stats = report.get("latency_stats_ms") if isinstance(report.get("latency_stats_ms"), dict) else None
     dataset = _dataset_manifest(report)
-    total_latency = _infer_total_latency_ms(profile, report, latency_stats)
-    profile_findings = _profile_findings(report, op_type_totals, latency_stats, roofline_summary)
+    profile_findings = _profile_findings(report, op_type_totals, roofline_summary)
 
     analysis_extra = {
         "source_profile_uid": profile.uid,
         "execution_mode_uid": profile.execution_mode_uid,
-        "latency_before": profile.latency_before,
-        "latency_after": profile.latency_after,
         "total_device_time_ms": report.get("total_device_time_ms"),
         "profile_iters": report.get("profile_iters"),
         "total_kernels": report.get("total_kernels"),
@@ -93,7 +89,6 @@ def analyze_profile(
 
     return AnalysisResult(
         uid=f"analysis:{profile.uid}",
-        total_latency=total_latency,
         top_ops=top_ops,
         hot_groups=hot_groups,
         extra=analysis_extra,
@@ -102,7 +97,6 @@ def analyze_profile(
         device_name=_optional_str(report.get("device_name")),
         dtype=_optional_str(report.get("dtype")),
         profile_report_path=str(report_path) if report_path is not None else None,
-        latency_stats_ms=latency_stats,
         dataset=dataset,
         top_kernels=top_kernels,
         op_type_totals=op_type_totals,
@@ -217,31 +211,11 @@ def _dataset_manifest(report: dict[str, Any]) -> dict | None:
     return dict(dataset) if isinstance(dataset, dict) else None
 
 
-def _infer_total_latency_ms(
-    profile: ProfileResult,
-    report: dict[str, Any],
-    latency_stats: dict | None,
-) -> float:
-    if latency_stats:
-        mean = _float_or_zero(latency_stats.get("mean"))
-        if mean > 0.0:
-            return mean
-    if profile.latency_after > 0.0:
-        return float(profile.latency_after)
-    total_device_time = _float_or_zero(report.get("total_device_time_ms"))
-    profile_iters = int(_float_or_zero(report.get("profile_iters")))
-    if total_device_time > 0.0 and profile_iters > 0:
-        return total_device_time / profile_iters
-    return total_device_time
-
-
 def _llm_profile_findings(
     report: dict[str, Any],
     op_type_totals: dict[str, dict],
-    latency_stats: dict | None,
     roofline_summary: dict[str, float],
 ) -> list[str] | None:
-    noise = _float_or_zero((latency_stats or {}).get("noise_relative"))
     prompt = (
         "You are an NPU performance DIAGNOSIS expert (not an optimizer).\n"
         "Describe WHERE time is spent and WHAT the bottleneck characteristics are.\n"
@@ -253,12 +227,11 @@ def _llm_profile_findings(
         f"dtype: {report.get('dtype')}\n"
         f"op_type_totals (top by device_time_ms): {json.dumps(op_type_totals, ensure_ascii=False)}\n"
         f"roofline_summary: {json.dumps(roofline_summary, ensure_ascii=False)}\n"
-        f"latency_noise_relative: {noise:.4f}\n"
         f"top5_pct: {(report.get('optimization_summary') or {}).get('top5_pct')}\n\n"
         'Return JSON: {"hints": ["<finding1>", "<finding2>", ...]}'
     )
     result = call_agent_json("analysis-agent", prompt, timeout=1000)
-    # 
+    #
     if not isinstance(result, dict):
         return None
     hints = result.get("hints")
@@ -270,7 +243,6 @@ def _llm_profile_findings(
 def _profile_findings(
     report: dict[str, Any],
     op_type_totals: dict[str, dict],
-    latency_stats: dict | None,
     roofline_summary: dict[str, float] | None = None,
 ) -> list[str]:
     """LLM diagnosis findings (no rule-based fallback).
@@ -284,7 +256,7 @@ def _profile_findings(
                 f"analysis agent unavailable: AGENT_ENABLED={AGENT_ENABLED!r}"
             )
         return _llm_profile_findings(
-            report, op_type_totals, latency_stats, roofline_summary or {}
+            report, op_type_totals, roofline_summary or {}
         ) or []
     except Exception as exc:
         print(f"[analysis] findings failed (AGENT_ENABLED={AGENT_ENABLED!r}): {exc}")

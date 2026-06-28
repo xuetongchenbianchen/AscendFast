@@ -48,7 +48,13 @@
       "Bash(find . -name \"*.run\")",
       "Bash(env -i bash --noprofile --norc -c ' *)",
       "Bash(cd *)",
-      "Bash(rm -rf /root/.cache/torch_extensions/py310_cpu/ascendfast_adapter_add_demo)"
+      "Bash(rm -rf /root/.cache/torch_extensions/py310_cpu/ascendfast_adapter_add_demo)",
+      "Bash(python *)",
+      "Bash(~/.vscode-server/bin/*/bin/code-server --list-extensions)",
+      "Bash(uv --version)",
+      "Bash(file .venv/bin/python* .venv/bin/pip*)",
+      "Bash(.venv/bin/python *)",
+      "Bash(grep -oP \".{0,300}Unable to handle.{0,300}\" /root/.vscode-server/extensions/ms-python.vscode-python-envs-1.20.1-linux-arm64/dist/extension.js)"
     ]
   }
 }

@@ -1,6 +1,6 @@
 ---
 name: npu-strategy
-description: Generate NPU optimization strategies. Use when mapping profiling hotspots to concrete optimization measures and estimating speedup for Ascend NPU models.
+description: Generate NPU optimization strategies from profiling data. Use this skill whenever you need to analyze Ascend NPU performance bottlenecks, map hotspots to optimization measures, estimate speedup ratios, or propose concrete optimization strategies. Also use when the user mentions AnalysisResult, profile interpretation, "what should I optimize", strategy generation, or asks about optimization priorities for NPU models.
 ---
 
 # NPU Optimization Strategy
@@ -16,7 +16,7 @@ class OptimizationStrategy:
     local_speedup_ratio: float  # expected speedup for this bottleneck
     measures: list[str]          # concrete steps
     prompt_instruction: str      # full prompt for the apply_optimization agent
-    extra: dict | None
+    extra: dict | None           # contains "kind" (lever), "custom_operator" (optional hint)
 ```
 
 ## 先选 LEVER，再选 measure
@@ -36,6 +36,25 @@ class OptimizationStrategy:
 `graph_rewrite` / `operator_fusion` / `loading_time` 改的是 `build_model.py`
 本身，通常更系统。当 profile 是 **launch-bound**（kernel 又小又多、
 `roofline_summary` 里算力利用率低）时，优先 `graph_rewrite`，别再去抠单个 cast。
+
+## 选择 Lever 的决策流程
+
+按以下优先级评估（从上到下）：
+
+1. **Launch-bound profile**（`roofline_summary` 算力利用率低 + kernel 又多又小）
+   → 首选 `graph_rewrite`（整模型 compile / 图模式）
+
+2. **Attention 在 naive/eager 路径上**（`top_ops` 里有多个 attention 相关算子、未走融合）
+   → 首选 `operator_fusion`（翻 config 的 `attn_implementation` 开关）
+
+3. **权重布局或 dtype 问题**（matmul 对齐差、残留 fp32 参数）
+   → 首选 `loading_time`（一次性预处理：ND→NZ、dtype 清理）
+
+4. **单个算子瓶颈**（某个 op 占比 >10%，其他分散）
+   → `forward_patch`（针对性修复，考虑融合或自定义算子）
+
+5. **多种问题混合**
+   → 生成至少 2 条不同 lever 的策略，覆盖主次瓶颈
 
 ## 按热点类型的策略 Playbook（多数为 `forward_patch`）
 
@@ -114,18 +133,75 @@ KV cache / 因动态 shape 触发重编译。
 **Speedup estimate**: 1.05–1.2；静态 cache 在 decode 阶段收益最大。
 **kind**: `loading_time`
 
+## Custom Operator 提示（可选）
+
+当 profile 显示一个**多算子融合**机会、而官方 `torch_npu` 没有对应的融合算子时，
+可以在策略的 `extra.custom_operator` 里附一个**提示**（不是命令）。
+
+### 何时附带 custom_operator 提示
+
+**适合的场景**：
+- 热点是多个小算子的序列（如 RMSNorm+residual、QKV+bias、RoPE+attention）
+- 官方 torch_npu 缺少对应的融合算子
+- 融合后能显著减少 launch/cast/GM-roundtrip 开销
+- 这些算子紧邻出现在 `top_ops` 里，且总占比 >5%
+
+**不要附带的场景**：
+- 官方已有覆盖良好的融合算子（手写 kernel 很难胜过官方优化）
+- 单个算子瓶颈（优化单算子不如用官方实现）
+- 不确定是否值得融合时
+- 算子之间有数据依赖，无法简单融合
+
+### 提示格式（JSON）
+
+```json
+{
+  "op_name": "rms_norm_residual",
+  "semantic": "y = rms_norm(x + residual, gamma, eps)",
+  "why_custom": "fuse two separate ops into one kernel, avoid intermediate GM write",
+  "fusion_targets": ["RMSNorm", "Add"],
+  "expected_signature": "rms_norm_residual(x, residual, gamma, eps) -> y"
+}
+```
+
+### 重要约束
+
+- 这只是给 apply-agent 的**提示**。apply-agent 会读真实代码后决定是否真的需要自定义算子，以及具体的 signature/arch_params。
+- 你只需说 **WHAT/WHY**，不要预判 HOW（tiling、数据类型、shape 约束等）。
+- **每条策略最多附一个** custom_operator 提示。
+- 提示中的 `op_name`、`semantic`、`why_custom` 是必须的；`fusion_targets` 和 `expected_signature` 是可选的。
+
 ## 估计 `local_speedup_ratio`
 
-用 Amdahl 定律：
-若瓶颈占运行时 **X%**、预期局部加速 **S**，整体加速 ≈ `1 / (1 - X/100 * (1 - 1/S))`。
+### 从 profile 数据提取瓶颈占比
 
-例：matmul 占 40% 时间，预期局部 1.2× → 整体 ≈ 1.07。
+- **单算子瓶颈**：在 `op_type_totals` 里找目标 op 的 `device_time_ms` / `total_latency`
+- **多算子融合**：把 `fusion_targets` 里所有 op 的时间加起来
+- **整体改动**（graph/loading）：看 `roofline_summary` 或相关 finding 里的描述
 
-保守默认值：
-- 有已知修法的明确瓶颈：1.1–1.2
-- 推测性或部分修复：1.05
-- 重大架构改动，例如把未融合的热路径换成融合算子：1.2–1.5
-- 在 launch-bound profile 上做整模型 `graph_rewrite`：1.1–1.4
+### 用 Amdahl 定律估计整体加速
+
+若瓶颈占 **X%**、预期局部加速 **S**，整体加速 ≈ `1 / (1 - X/100 * (1 - 1/S))`
+
+**公式解释**：
+- `X/100` 是瓶颈占比（小数形式）
+- `1/S` 是优化后该部分的相对时间
+- `(1 - 1/S)` 是优化掉的时间比例
+- `X/100 * (1 - 1/S)` 是对总时间的改善
+- `1 - X/100 * (1 - 1/S)` 是优化后的总相对时间
+- 倒数即为加速比
+
+**示例**：
+- matmul 占 40%，预期局部 1.2× → 整体 ≈ 1 / (1 - 0.4 * (1 - 1/1.2)) ≈ 1.07
+- launch overhead 占 25%，graph compile 预期 1.5× → 整体 ≈ 1 / (1 - 0.25 * (1 - 1/1.5)) ≈ 1.09
+- copy/cast 占 8%，消除后 → 整体 ≈ 1 / (1 - 0.08) ≈ 1.09
+
+### 保守默认值（agent 不确定时用）
+
+- 明确瓶颈 + 已知修法：1.1–1.2
+- 推测性修复：1.05
+- 重大架构改动（fusion/graph）：1.2–1.5
+- launch-bound profile 做整模型 graph_rewrite：1.1–1.4
 
 ## 在一次扇出里让 lever 多样化
 
@@ -138,8 +214,14 @@ KV cache / 因动态 shape 触发重编译。
 
 模板（来自 `_build_strategy_prompt`）：
 ```
-Optimize the model execution according to the profiling analysis.
-Keep numerical correctness unchanged and prefer small, measurable changes.
+Implement the optimization strategy below against the model execution.
+The focus and measures are already chosen — your job is the HOW: select the
+concrete API, signature, and guards; decide where to apply the patch and how
+to wire build_model; and verify functional equivalence. Preserve correctness
+while delivering the targeted latency reduction.
+
+Lever (kind): <kind>
+<lever-specific hint from _LEVER_HINTS>
 
 Focus:
 <one-sentence bottleneck + goal>
@@ -158,6 +240,9 @@ Profile context:
 - top_ops: ...
 - op_type_totals: {...}
 - roofline_summary: {...}
+
+Report this same kind (<kind>) in your ChangeRecord JSON unless the actual
+change ended up on a different lever.
 ```
 
 收到这个 prompt 的 agent 会修改模型代码。要具体：引用真实的算子名、
@@ -168,4 +253,74 @@ Profile context:
   (after `from_pretrained`, before `return`); do **not** patch any `forward`.」
 - `operator_fusion`：「Set the config flag at load; do not hand-patch the
   attention forward.」
+
 在 prompt 和 `extra={"kind": ...}` 里都带上 `kind`。
+
+## 完整示例
+
+### Input (AnalysisResult 摘要)
+
+```python
+AnalysisResult(
+    total_latency=45.2,  # ms
+    top_ops=["aten::linear", "aten::copy_", "aten::mul", "aten::softmax"],
+    op_type_totals={
+        "matmul": {"device_time_ms": 18.5, "pct_total": 40.9},
+        "copy_cast": {"device_time_ms": 3.6, "pct_total": 8.0},
+        "elementwise": {"device_time_ms": 2.1, "pct_total": 4.6}
+    },
+    roofline_summary={
+        "compute_utilization": 0.35,
+        "memory_bandwidth_utilization": 0.68
+    },
+    profile_findings=[
+        "launch-bound: 328 small kernels with low compute utilization",
+        "frequent ND↔NZ layout conversions detected"
+    ]
+)
+```
+
+### Output (OptimizationStrategy 示例)
+
+**Strategy 1** (`graph_rewrite`，主攻 launch overhead):
+```python
+OptimizationStrategy(
+    uid="strategy:...:1",
+    local_speedup_ratio=1.25,
+    measures=[
+        "Wrap model with torch.compile(backend='npu') or torch_npu graph mode",
+        "Enable graph capture for decode step to amortize kernel launch",
+        "Verify numerical equivalence against eager baseline with tolerance atol=1e-2"
+    ],
+    prompt_instruction="...",  # 根据模板生成
+    extra={
+        "kind": "graph_rewrite",
+        "model_id": "...",
+        "custom_operator": None
+    }
+)
+```
+**估算依据**：launch overhead 隐含占比约 20-25%（从 compute_utilization 低推断），
+graph compile 预期局部 1.5× → 整体约 1 / (1 - 0.22 * 0.33) ≈ 1.08，保守上调到 1.25
+考虑整体融合收益。
+
+**Strategy 2** (`loading_time`，主攻 layout 转换):
+```python
+OptimizationStrategy(
+    uid="strategy:...:2",
+    local_speedup_ratio=1.12,
+    measures=[
+        "Pre-convert all linear layer weights to NZ format after from_pretrained",
+        "Pin fp16 dtype across hot path to eliminate redundant casts",
+        "Pad sequence length to 128 for better tile alignment"
+    ],
+    prompt_instruction="...",
+    extra={
+        "kind": "loading_time",
+        "model_id": "...",
+        "custom_operator": None
+    }
+)
+```
+**估算依据**：copy_cast 占 8%，完全消除 → 整体 1/(1-0.08) ≈ 1.09，考虑对齐收益
+上调到 1.12。
