@@ -7,7 +7,7 @@ runs/
 .govctl.lock
 .govctl/
 data/
-profile/
+profiles/
 workspace/
 
 # Python 编译缓存
