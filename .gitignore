@@ -1,21 +1,28 @@
+# Model/data symlinks and local run artifacts
 model/
+model
+data/
+data
 adaptations/
 runs/
-.venv/
-.uv-cache/
-.python-version
-.govctl.lock
-.govctl/
-data/
-profiles/
+experiment_outputs/
 workspace/
 
-# Python 编译缓存
+# Profiles and profiler outputs
+profile/
+profiles/
+
+# Python/uv environments and caches
+.venv/
+.uv-cache/
+.venv_link_to_backup_*
+.python-version
 __pycache__/
 *.pyc
 *.pyo
 
-# 自定义算子的编译产物（可由 op_host/ op_kernel/ + CMake 重新编译生成）
+# Custom operator build/install artifacts
+kernel_meta/
 kernels/ascendc_ops/ascendfast_custom_ops/build_out/
 kernels/ascendc_ops/_installed_opp/
 *.so
@@ -23,10 +30,9 @@ kernels/ascendc_ops/_installed_opp/
 *.a
 *.run
 
-# agent一些需要忽略信息
+# Local tool state
+.govctl.lock
+.govctl/
 .claude/settings.local.json
-
-#vscode 设置
 .vscode/
-
 goal.md
