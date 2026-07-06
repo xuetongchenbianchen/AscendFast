@@ -6,7 +6,6 @@ data
 adaptations/
 runs/
 experiment_outputs/
-traces/
 workspace/
 
 # Profiles and profiler outputs
